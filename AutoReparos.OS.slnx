@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/AutoReparos.OS.Api/" />
+  <Folder Name="/AutoReparos.OS.Infrastructure/" />
+  <Project Path="AutoReparos.OS.Api.Tests/AutoReparos.OS.Api.Tests.csproj" />
+  <Project Path="AutoReparos.Os.Api/AutoReparos.Os.Api.csproj" />
+  <Project Path="AutoReparos.Os.Application/AutoReparos.Os.Application.csproj" />
+  <Project Path="AutoReparos.Os.Domain/AutoReparos.Os.Domain.csproj" />
+  <Project Path="AutoReparos.Os.Infrastructure/AutoReparos.Os.Infrastructure.csproj" />
+  <Project Path="AutoReparos.OS.IntegrationTests/AutoReparos.OS.IntegrationTests.csproj" />
+  <Project Path="AutoReparos.OS.Tests/AutoReparos.OS.Tests.csproj" />
+</Solution>

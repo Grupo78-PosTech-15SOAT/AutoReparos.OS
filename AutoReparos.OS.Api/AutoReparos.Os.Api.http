@@ -1,0 +1,6 @@
+@AutoReparos.Os.Api_HostAddress = http://localhost:5083
+
+GET {{AutoReparos.Os.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
