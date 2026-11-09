@@ -25,7 +25,23 @@ internal static class CorpoJson
         valor = Guid.Empty;
         return Propriedade(corpo, nome, out var elemento)
             && elemento.ValueKind == JsonValueKind.String
-            && Guid.TryParse(elemento.GetString(), out valor);
+            && TentarLerTexto(elemento, out var texto)
+            && Guid.TryParse(texto, out valor);
+    }
+
+    // GetString lança InvalidOperationException para surrogate isolado em strings JSON.
+    private static bool TentarLerTexto(JsonElement elemento, out string? texto)
+    {
+        try
+        {
+            texto = elemento.GetString();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            texto = null;
+            return false;
+        }
     }
 
     public static bool TentarLerObservacao(JsonElement corpo, out bool presente, out string? valor)
@@ -34,8 +50,9 @@ internal static class CorpoJson
         presente = Propriedade(corpo, "observacao", out var elemento);
         if (!presente || elemento.ValueKind == JsonValueKind.Null) return true;
         if (elemento.ValueKind != JsonValueKind.String) return false;
-        valor = elemento.GetString();
-        return valor is null || valor.Length <= LimiteObservacao;
+        if (!TentarLerTexto(elemento, out valor)) return false;
+        // O PostgreSQL rejeita o caractere NUL em text (erro 22021).
+        return valor is null || (valor.Length <= LimiteObservacao && !valor.Contains((char)0));
     }
 
     private static bool Propriedade(JsonElement corpo, string nome, out JsonElement elemento)

@@ -174,6 +174,9 @@ public sealed class OrderContracts : IAsyncLifetime
             ("[]", "application/json"),
             (null, "application/json"),
             ($$"""{"clienteId":"{{valid}}","veiculoId":"{{valid}}"}""", "text/plain"),
+            ($$"""{"clienteId":"{{valid}}","veiculoId":"{{valid}}","observacao":"a\u0000b"}""", "application/json"),
+            ($$"""{"clienteId":"{{valid}}","veiculoId":"{{valid}}","observacao":"\ud800"}""", "application/json"),
+            ($$"""{"clienteId":"\ud800","veiculoId":"{{valid}}"}""", "application/json"),
         };
         foreach (var (body, contentType) in bodies)
         {
@@ -197,6 +200,8 @@ public sealed class OrderContracts : IAsyncLifetime
             ("\"texto\"", "application/json"),
             ("""{"observacao":5}""", "application/json"),
             ("""{"observacao":"novo"}""", "text/plain"),
+            ("""{"observacao":"a\u0000b"}""", "application/json"),
+            ("""{"observacao":"\ud800"}""", "application/json"),
         };
         foreach (var (body, contentType) in bodies)
         {
