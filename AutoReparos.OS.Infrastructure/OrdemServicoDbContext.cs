@@ -17,6 +17,7 @@ public sealed class OrdemServicoDbContext(DbContextOptions<OrdemServicoDbContext
         ordem.HasKey(x => x.Id);
         ordem.Property(x => x.Status).HasMaxLength(40).IsRequired();
         ordem.Property(x => x.Observacao).HasMaxLength(2000);
+        ordem.Property<uint>("Version").IsRowVersion();
         ordem.HasMany(x => x.Historico).WithOne().HasForeignKey(x => x.OrdemServicoId);
         ordem.Navigation(x => x.Historico).UsePropertyAccessMode(PropertyAccessMode.Field);
         var historico = modelBuilder.Entity<HistoricoOS>();

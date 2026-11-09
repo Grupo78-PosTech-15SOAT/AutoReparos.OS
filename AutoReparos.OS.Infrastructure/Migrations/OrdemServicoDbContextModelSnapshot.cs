@@ -67,6 +67,12 @@ namespace AutoReparos.Os.Infrastructure.Migrations
                     b.Property<Guid>("VeiculoId")
                         .HasColumnType("uuid");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.ToTable("ordens_servico", (string)null);
