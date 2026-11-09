@@ -41,7 +41,7 @@ public sealed class OrdemServicoDbContext(DbContextOptions<OrdemServicoDbContext
             {
                 Id = id,
                 CriadoEm = DateTimeOffset.UtcNow,
-                Conteudo = JsonSerializer.Serialize(new { eventId = id, tipo, ordem.Id, ordem.ClienteId, ordem.VeiculoId, ordem.Status, ordem.Observacao })
+                Conteudo = JsonSerializer.Serialize(new { eventId = id, tipo, id = ordem.Id, clienteId = ordem.ClienteId, veiculoId = ordem.VeiculoId, status = ordem.Status, observacao = ordem.Observacao })
             });
         }
         await SaveChangesAsync(cancellationToken);

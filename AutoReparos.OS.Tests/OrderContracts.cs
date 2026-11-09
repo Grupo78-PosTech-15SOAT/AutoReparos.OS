@@ -77,6 +77,8 @@ public sealed class OrderContracts : IAsyncLifetime
         {
             var evento = JsonDocument.Parse(m.Conteudo).RootElement.Clone();
             Assert.Equal(m.Id, evento.GetProperty("eventId").GetGuid());
+            Assert.Equal(new[] { "clienteId", "eventId", "id", "observacao", "status", "tipo", "veiculoId" }, evento.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.DoesNotContain(evento.EnumerateObject(), p => char.IsUpper(p.Name[0]));
             return evento;
         }).ToList();
     }
@@ -101,7 +103,7 @@ public sealed class OrderContracts : IAsyncLifetime
         Assert.Equal(new State("ruído", 1, 1, 1), await StateOf(created.Id));
         var evento = Assert.Single(await Outbox());
         Assert.Equal("ordem-servico.criada.v1", evento.GetProperty("tipo").GetString());
-        Assert.Equal(created.Id, evento.GetProperty("Id").GetGuid());
+        Assert.Equal(created.Id, evento.GetProperty("id").GetGuid());
     }
 
     [Theory]
@@ -242,11 +244,11 @@ public sealed class OrderContracts : IAsyncLifetime
         Assert.Equal(2, outbox.Count);
         var evento = outbox[1];
         Assert.Equal("ordem-servico.atualizada.v1", evento.GetProperty("tipo").GetString());
-        Assert.Equal(id, evento.GetProperty("Id").GetGuid());
-        Assert.Equal("Recebida", evento.GetProperty("Status").GetString());
-        Assert.Equal("depois", evento.GetProperty("Observacao").GetString());
-        Assert.NotEqual(Guid.Empty, evento.GetProperty("ClienteId").GetGuid());
-        Assert.NotEqual(Guid.Empty, evento.GetProperty("VeiculoId").GetGuid());
+        Assert.Equal(id, evento.GetProperty("id").GetGuid());
+        Assert.Equal("Recebida", evento.GetProperty("status").GetString());
+        Assert.Equal("depois", evento.GetProperty("observacao").GetString());
+        Assert.NotEqual(Guid.Empty, evento.GetProperty("clienteId").GetGuid());
+        Assert.NotEqual(Guid.Empty, evento.GetProperty("veiculoId").GetGuid());
         Assert.NotEqual(outbox[0].GetProperty("eventId").GetGuid(), evento.GetProperty("eventId").GetGuid());
     }
 
@@ -271,7 +273,7 @@ public sealed class OrderContracts : IAsyncLifetime
             Assert.Equal(winner.Valor, (await StateOf(id)).Observacao);
             var outbox = await Outbox();
             Assert.Equal(2, outbox.Count);
-            Assert.Equal(winner.Valor, outbox[1].GetProperty("Observacao").GetString());
+            Assert.Equal(winner.Valor, outbox[1].GetProperty("observacao").GetString());
         }
         finally
         {
