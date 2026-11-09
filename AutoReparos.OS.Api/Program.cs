@@ -49,11 +49,15 @@ if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
 app.UseAuthorization();
 var ordens = app.MapGroup("/api/v1/ordens-servico").RequireAuthorization("OperarOS");
-ordens.MapPost("/", async (CriarOrdem request, IOrdemServicoRepository repository, CancellationToken ct) =>
+ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, CancellationToken ct) =>
 {
-    if (request.ClienteId == Guid.Empty || request.VeiculoId == Guid.Empty || request.Observacao?.Length > 2000)
-        return Results.UnprocessableEntity(new { codigo = "ordem_servico_invalida" });
-    var ordem = new OrdemServico(request.ClienteId, request.VeiculoId, request.Observacao, DateTimeOffset.UtcNow);
+    var corpo = await CorpoJson.LerObjetoAsync(http, ct);
+    if (corpo is null
+        || !CorpoJson.TentarLerGuid(corpo.Value, "clienteId", out var clienteId) || clienteId == Guid.Empty
+        || !CorpoJson.TentarLerGuid(corpo.Value, "veiculoId", out var veiculoId) || veiculoId == Guid.Empty
+        || !CorpoJson.TentarLerObservacao(corpo.Value, out _, out var observacao))
+        return CorpoJson.Invalido();
+    var ordem = new OrdemServico(clienteId, veiculoId, observacao, DateTimeOffset.UtcNow);
     await repository.AdicionarAsync(ordem, ct);
     await repository.SalvarAsync(ct);
     return Results.Created($"/api/v1/ordens-servico/{ordem.Id}", new { ordem.Id, ordem.Status });
@@ -63,16 +67,26 @@ ordens.MapGet("/{id:guid}", async (Guid id, IOrdemServicoRepository repository, 
     var ordem = await repository.ObterAsync(id, ct);
     return ordem is null ? Results.NotFound() : Results.Ok(new { ordem.Id, ordem.ClienteId, ordem.VeiculoId, ordem.Observacao, ordem.Status, Historico = ordem.Historico.OrderBy(h => h.RegistradoEm).ThenBy(h => h.Id) });
 });
-ordens.MapPatch("/{id:guid}", async (Guid id, AtualizarOrdem request, IOrdemServicoRepository repository, CancellationToken ct) =>
+ordens.MapPatch("/{id:guid}", async (Guid id, HttpRequest http, IOrdemServicoRepository repository, CancellationToken ct) =>
 {
-    if (request.Observacao?.Length > 2000) return Results.UnprocessableEntity(new { codigo = "ordem_servico_invalida" });
+    var corpo = await CorpoJson.LerObjetoAsync(http, ct);
+    if (corpo is null || !CorpoJson.TentarLerObservacao(corpo.Value, out var presente, out var observacao))
+        return CorpoJson.Invalido();
     var ordem = await repository.ObterAsync(id, ct);
     if (ordem is null) return Results.NotFound();
-    ordem.AtualizarObservacao(request.Observacao);
-    await repository.SalvarAsync(ct);
+    if (presente)
+    {
+        ordem.AtualizarObservacao(observacao);
+        try
+        {
+            await repository.SalvarAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { codigo = "ordem_servico_conflito" });
+        }
+    }
     return Results.Ok(new { ordem.Id, ordem.Status, ordem.Observacao });
 });
 app.Run();
-public sealed record CriarOrdem(Guid ClienteId, Guid VeiculoId, string? Observacao);
-public sealed record AtualizarOrdem(string? Observacao);
 public partial class Program;
