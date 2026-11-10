@@ -44,6 +44,7 @@ builder.Services.AddAuthorization(options => options.AddPolicy("OperarOS", polic
     policy.RequireRole("Administrador", "Atendente", "Mecanico", "ServicoOS")));
 builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
 builder.Services.AddHostedService<PublicadorSqs>();
+builder.Services.AddSagaOS(builder.Configuration);
 var app = builder.Build();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
