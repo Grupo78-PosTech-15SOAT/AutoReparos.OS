@@ -25,6 +25,17 @@ public sealed class OrdemServico
     }
 
     public void AtualizarObservacao(string? observacao) => Observacao = observacao;
+
+    /// <summary>Define o status e acrescenta histórico somente se ele mudou; devolve o novo registro ou null.</summary>
+    public HistoricoOS? DefinirStatus(string status, DateTimeOffset agora)
+    {
+        if (!StatusOS.Todos.Contains(status)) throw new ArgumentException($"Status desconhecido: {status}.", nameof(status));
+        if (Status == status) return null;
+        Status = status;
+        var registro = new HistoricoOS(Guid.NewGuid(), Id, status, agora);
+        _historico.Add(registro);
+        return registro;
+    }
 }
 
 public sealed record HistoricoOS(Guid Id, Guid OrdemServicoId, string Status, DateTimeOffset RegistradoEm);
