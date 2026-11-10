@@ -2,6 +2,11 @@
 """Verifica que o README do OS documenta a Saga: secao `## Saga`, estrategia, armazenamento de estado e a
 justificativa contra coreografia.
 
+A justificativa precisa existir de fato, nao apenas como palavras-chave: dentro da secao `## Saga` deve haver um
+subtitulo de justificativa (que mencione coreografia) cujo corpo -- o texto abaixo do subtitulo, sem contar o
+proprio titulo -- tenha pelo menos 40 palavras, compare orquestracao e coreografia e cite pelo menos 3 dos 4 criterios
+(visibilidade, retomada, compensacao, auditoria).
+
 Uso (a partir de qualquer diretorio; o README e localizado relativo a este arquivo):
 
     python scripts/assert_saga_readme.py --name saga-rationale --strategy orchestrated --state-store DynamoDB
@@ -18,8 +23,17 @@ ESTRATEGIAS = {
     "orchestrated": ("orquestrad", "orchestrat"),
     "choreographed": ("coreografad", "choreograph"),
 }
-TERMOS_JUSTIFICATIVA = ("visibilidade", "retomada", "compensacao ordenada", "auditoria")
-MINIMO_TERMOS_JUSTIFICATIVA = 2
+# Cada criterio aceita as formas usadas no texto (apos normalizar acentos e caixa).
+CRITERIOS_JUSTIFICATIVA = {
+    "visibilidade": ("visibilidade",),
+    "retomada": ("retomada", "retomar"),
+    "compensacao": ("compensacao", "compensar"),
+    "auditoria": ("auditoria", "auditar"),
+}
+MINIMO_CRITERIOS = 3
+MINIMO_PALAVRAS_JUSTIFICATIVA = 40
+TERMOS_COREOGRAFIA = ("coreografia", "coreografad")
+TERMOS_ORQUESTRACAO = ("orquestracao", "orquestrad", "orquestrador")
 
 
 def normalizar(texto):
@@ -45,6 +59,51 @@ def extrair_secao_saga(markdown):
     return "\n".join(linhas[inicio:fim])
 
 
+def subsecoes(secao):
+    """Divide a secao em pares (titulo, corpo) por subtitulos de nivel 3 ou mais (`###`...). O texto antes do primeiro
+    subtitulo nao pertence a nenhuma subsecao. O corpo vai ate o proximo subtitulo de qualquer nivel de 3 em diante."""
+    pares = []
+    titulo = None
+    corpo = []
+    for linha in secao.splitlines():
+        if re.match(r"#{3,}\s+\S", linha):
+            if titulo is not None:
+                pares.append((titulo, "\n".join(corpo)))
+            titulo = re.sub(r"^#{3,}\s+", "", linha).strip()
+            corpo = []
+        elif titulo is not None:
+            corpo.append(linha)
+    if titulo is not None:
+        pares.append((titulo, "\n".join(corpo)))
+    return pares
+
+
+def contar_palavras(texto):
+    # Ignora cercas de codigo e marcadores de lista; conta apenas palavras de verdade.
+    sem_codigo = re.sub(r"```.*?```", " ", texto, flags=re.DOTALL)
+    return len(re.findall(r"[A-Za-zÀ-ÿ]{2,}", sem_codigo))
+
+
+def avaliar_justificativa(titulo, corpo):
+    """Devolve (problemas, criterios_citados) para uma subsecao candidata."""
+    problemas = []
+    texto = normalizar(corpo)
+    palavras = contar_palavras(corpo)
+    if palavras < MINIMO_PALAVRAS_JUSTIFICATIVA:
+        problemas.append(f"o corpo tem {palavras} palavras (minimo {MINIMO_PALAVRAS_JUSTIFICATIVA}); o titulo sozinho nao conta")
+    if not any(t in texto for t in TERMOS_COREOGRAFIA):
+        problemas.append("o corpo nao menciona coreografia")
+    if not any(t in texto for t in TERMOS_ORQUESTRACAO):
+        problemas.append("o corpo nao menciona orquestracao (a comparacao precisa citar as duas estrategias)")
+    criterios = [nome for nome, formas in CRITERIOS_JUSTIFICATIVA.items() if any(f in texto for f in formas)]
+    if len(criterios) < MINIMO_CRITERIOS:
+        problemas.append(
+            f"o corpo cita {len(criterios)} criterios ({', '.join(criterios) or 'nenhum'}); "
+            f"minimo {MINIMO_CRITERIOS} de [{', '.join(CRITERIOS_JUSTIFICATIVA)}]"
+        )
+    return problemas, criterios
+
+
 def verificar(markdown, estrategia, armazenamento):
     """Devolve a lista de problemas encontrados (vazia quando o README esta conforme)."""
     secao = extrair_secao_saga(markdown)
@@ -57,15 +116,23 @@ def verificar(markdown, estrategia, armazenamento):
         problemas.append(f"a secao `## Saga` nao descreve a estrategia '{estrategia}' (esperado um dos termos: {', '.join(termos)})")
     if normalizar(armazenamento) not in texto:
         problemas.append(f"a secao `## Saga` nao cita o armazenamento de estado '{armazenamento}'")
-    if "coreografia" not in texto:
-        problemas.append("a secao `## Saga` nao compara a estrategia com coreografia (termo 'coreografia' ausente)")
-    else:
-        presentes = [t for t in TERMOS_JUSTIFICATIVA if t in texto]
-        if len(presentes) < MINIMO_TERMOS_JUSTIFICATIVA:
-            problemas.append(
-                "a justificativa contra coreografia e insuficiente: cite ao menos "
-                f"{MINIMO_TERMOS_JUSTIFICATIVA} de [{', '.join(TERMOS_JUSTIFICATIVA)}] (encontrados: {', '.join(presentes) or 'nenhum'})"
-            )
+
+    candidatas = [(t, c) for t, c in subsecoes(secao) if any(termo in normalizar(t) for termo in TERMOS_COREOGRAFIA)]
+    if not candidatas:
+        problemas.append(
+            "a secao `## Saga` nao tem um subtitulo de justificativa contra coreografia "
+            "(esperado um subtitulo `###` cujo titulo mencione coreografia)"
+        )
+        return problemas
+
+    falhas_por_candidata = []
+    for titulo, corpo in candidatas:
+        falhas, _ = avaliar_justificativa(titulo, corpo)
+        if not falhas:
+            return problemas
+        falhas_por_candidata.append((titulo, falhas))
+    titulo, falhas = falhas_por_candidata[0]
+    problemas.append(f"a justificativa contra coreografia ('{titulo}') e insuficiente: " + "; ".join(falhas))
     return problemas
 
 

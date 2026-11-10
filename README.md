@@ -2,7 +2,7 @@
 
 Serviço de ordens de serviço da Fase 4. Configure `ConnectionStrings__OrdemServico` com a conexão do banco próprio, `Authentication__Authority` e `Authentication__Audience` com os dados do emissor JWT, `AWS_REGION`, `Sqs__QueueUrl` e `Sqs__DeadLetterQueueUrl` antes de executar.
 
-O serviço exige os papéis `Administrador`, `Atendente`, `Mecanico` ou `ServicoOS`. O emissor deve atribuir `ServicoOS` somente às identidades de serviço autorizadas.
+O serviço exige os papéis `Administrador`, `Atendente`, `Mecanico` ou `ServicoOS`; a rota de cancelamento exige `Administrador` ou `Atendente`. O emissor deve atribuir `ServicoOS` somente às identidades de serviço autorizadas.
 
 Aplique as migrações com `dotnet ef database update --project AutoReparos.OS.Infrastructure --startup-project AutoReparos.OS.Api` usando as credenciais de migração apropriadas. Configure a conexão por variável de ambiente; não armazene credenciais no repositório.
 
@@ -42,12 +42,12 @@ O OS Service é o **orquestrador** da Saga do ciclo da OS. A estratégia é **or
 
 ### Por que orquestração e não coreografia
 
-Na coreografia cada serviço reage aos eventos dos outros e ninguém conhece o fluxo inteiro. Para este ciclo isso falha nos pontos que a Fase 4 exige:
+Na coreografia cada serviço reage aos eventos dos outros e ninguém conhece o fluxo inteiro; na orquestração um único coordenador (o OS Service) conhece o fluxo, decide o próximo passo e guarda o estado. Para este ciclo, que envolve OS, Billing e Execution e exige desfazer etapas, a comparação nos quatro critérios que a Fase 4 exige é esta:
 
-- **Visibilidade**: com o estado central é possível saber em que etapa cada OS está e por quê; na coreografia o estado fica espalhado em três bancos e só se reconstrói juntando logs.
-- **Retomada**: após uma queda, o orquestrador relê o estado persistido e continua do último passo, sem perder etapas concluídas; na coreografia não há quem retome um fluxo parado no meio.
-- **Compensação ordenada**: falhas e cancelamentos desfazem as etapas concluídas em ordem inversa (execução, depois orçamento), uma por vez; na coreografia a ordem emerge de reações em cadeia e é difícil de garantir.
-- **Auditoria**: cada transição, comando e resultado de compensação fica registrado na Saga, com o `correlacaoId` da OS.
+- **Visibilidade**: na orquestração o estado central diz em que etapa cada OS está e por quê; na coreografia o estado fica espalhado em três bancos e só se reconstrói juntando logs de serviços diferentes.
+- **Retomada**: na orquestração, após uma queda, o orquestrador relê o estado persistido e continua do último passo, sem perder etapas concluídas; na coreografia não há quem retome um fluxo parado no meio, porque cada serviço só conhece o seu pedaço.
+- **Compensação ordenada**: na orquestração falhas e cancelamentos desfazem as etapas concluídas em ordem inversa (execução, depois orçamento), uma por vez, com confirmação de cada uma; na coreografia a ordem emerge de reações em cadeia e é difícil de garantir.
+- **Auditoria**: na orquestração cada transição, comando e resultado de compensação fica registrado na Saga, com o `correlacaoId` da OS; na coreografia a trilha precisa ser montada a partir de eventos soltos.
 
 O custo aceito é um ponto central de coordenação, mitigado por estado durável, deduplicação e retentativas.
 
@@ -83,7 +83,7 @@ Sequência normal: `orcamento.aprovado.v1` cria a Saga em `OrcamentoAprovado` �
 | `Compensada` | todas as compensações confirmadas | sim |
 | `CompensacaoFalhou` | compensação recusada ou esgotada; exige intervenção e gera alerta | sim |
 
-A OS no Postgres acompanha cada transição, com histórico: `Recebida` → `OrcamentoAprovado` → `EmExecucao` → `ServicoConcluido` → `Paga`; desvios `IntervencaoRequerida` e `Cancelada`. A sincronização é idempotente (o mesmo status não duplica histórico) e usa a concorrência otimista da OS.
+A OS no Postgres acompanha cada transição, com histórico: `Recebida` → `OrcamentoAprovado` → `EmExecucao` → `Concluida` → `Paga`; desvios `IntervencaoRequerida` e `Cancelada`. `Concluida` é o status que o Billing exige no `GET /api/v1/ordens-servico/{id}` para liberar a cobrança. A sincronização é idempotente (o mesmo status não duplica histórico) e usa a concorrência otimista da OS.
 
 ### Etapas e compensações
 
@@ -94,7 +94,23 @@ A OS no Postgres acompanha cada transição, com histórico: `Recebida` → `Orc
 | 3. Execução concluída | nenhuma (só recuperação para frente) |
 | 4. Pagamento capturado | nenhuma: **nunca há estorno automático** |
 
-`execucao.liberacao-recusada.v1` e `ordem-servico.cancelar.v1` compensam as etapas concluídas em ordem inversa (a etapa 1 só é compensada depois que a 2 for confirmada) e registram o resultado ou o erro de cada compensação na Saga. Com a execução concluída o cancelamento é recusado e alertado. `execucao.falhou.v1` leva a `IntervencaoRequerida` sem compensar.
+`execucao.liberacao-recusada.v1` e `ordem-servico.cancelar.v1` compensam as etapas concluídas em ordem inversa (a etapa 1 só é compensada depois que a 2 for confirmada) e registram o resultado ou o erro de cada compensação na Saga. Com a execução concluída o cancelamento é recusado e alertado. `execucao.falhou.v1` leva a `IntervencaoRequerida` sem compensar; cancelar nesse estado compensa as etapas 2 e 1 (o Execution aceita cancelar uma execução `Falhou`).
+
+Um `ordem-servico.liberada.v1` ainda **não enviado** (pendente, por exemplo em backoff) é **descartado** no cancelamento em vez de compensado: a execução nunca o recebeu, então só a etapa 1 é compensada. Os comandos de uma Saga saem em ordem de criação: nenhum comando, inclusive o de cancelamento, ultrapassa outro comando pendente em backoff.
+
+### Rota de cancelamento
+
+`POST /api/v1/ordens-servico/{id}/cancelamento` com `{ "motivo": "..." }` é o gatilho de produção da compensação. Só os papéis `Administrador` e `Atendente` podem usá-la.
+
+| Resposta | Quando |
+| --- | --- |
+| `202` com `ordemServicoId`, `correlacaoId` e `estado` | cancelamento aceito (ou já aceito: repetir devolve `202` sem novo efeito) |
+| `401` / `403` | sem autenticação / papel sem permissão |
+| `404` | OS inexistente |
+| `409` com `codigo: cancelamento_indisponivel` | a execução já concluiu ou o pagamento já foi capturado (nunca há estorno) |
+| `422` com `codigo: ordem_servico_invalida` | `motivo` vazio, acima de 2000 caracteres, com NUL, com surrogate isolado, ausente, não textual ou JSON inválido |
+
+OS sem Saga (orçamento ainda não aprovado) vira `Cancelada` diretamente e a resposta é `202` com `estado: "Cancelada"` e `correlacaoId: null`. OS com Saga segue o mesmo caminho da mensagem `ordem-servico.cancelar.v1`, com `eventId` determinístico por OS (por isso é idempotente); a compensação acontece de forma assíncrona e o `estado` devolvido é o da Saga naquele instante (por exemplo `Compensando`).
 
 ### Contrato de mensagens (resumo, v1)
 
@@ -103,11 +119,11 @@ Envelope JSON em camelCase: `eventId`, `tipo`, `correlacaoId`, `ordemServicoId`,
 | Entrada (fila `Sqs__SagaQueueUrl`) | Origem | Efeito |
 | --- | --- | --- |
 | `orcamento.aprovado.v1` | Billing | cria a Saga e libera a execução |
-| `execucao.concluida.v1` | Execution | `ExecucaoConcluida` |
+| `execucao.concluida.v1` | Execution | `ExecucaoConcluida` e OS `Concluida` |
 | `execucao.falhou.v1` | Execution | `IntervencaoRequerida` |
 | `execucao.liberacao-recusada.v1` | Execution | compensa a etapa 1 |
-| `pagamento.resultado.v1` | Billing | `Capturado` → `PagamentoCapturado`; demais status só no registro |
-| `ordem-servico.cancelar.v1` | interna | compensa as etapas concluídas |
+| `pagamento.resultado.v1` | Billing | `Capturado` → `PagamentoCapturado` e OS `Paga`; os outros seis status do Billing (`SemTentativa`, `Pendente`, `Rejeitado`, `Cancelado`, `Expirado`, `Reembolsado`) só entram no registro; valor desconhecido vai à DLQ com alerta |
+| `ordem-servico.cancelar.v1` | interna (gerada pela rota de cancelamento) | compensa as etapas concluídas; `motivo` obrigatório, até 2000 caracteres |
 | `orcamento.cancelado.v1`, `orcamento.cancelamento-recusado.v1` | Billing | confirma ou recusa a compensação 1 |
 | `execucao.cancelada.v1`, `execucao.cancelamento-recusado.v1` | Execution | confirma ou recusa a compensação 2 |
 
@@ -124,6 +140,13 @@ O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md
 - **Entrega pelo menos uma vez, efeito uma vez**: cada `eventId` processado é registrado na tabela `autoreparos-os-saga-eventos` (com TTL) na mesma transação da transição; duplicatas, inclusive simultâneas, não repetem o efeito. Mensagem fora de ordem ou transição inválida é rejeitada de forma idempotente e registrada na Saga.
 - **Retomada**: o despachador em segundo plano lê um índice esparso com as Sagas que têm comando ou sincronização pendente e continua de onde parou, inclusive ao iniciar o processo.
 - **Retry técnico**: 5 tentativas, backoff exponencial (base 1 s, teto 30 s) com jitter de até 50% do atraso; ao esgotar, a mensagem ou o comando vai à DLQ (`Sqs__SagaDeadLetterQueueUrl`) e gera o alerta `saga.mensagem-esgotada` ou `saga.comando-esgotado`. Mensagem malformada ou de `tipo` desconhecido vai direto à DLQ (`saga.mensagem-invalida`). Um comando de compensação esgotado leva a Saga a `CompensacaoFalhou` (`saga.compensacao-falhou`).
+- **Prazo da compensação**: o estado `Compensando` sem confirmação no prazo `Saga__PrazoCompensacao` (padrão 15 minutos, reiniciado a cada etapa compensada) gera o alerta `saga.compensacao-sem-resposta` e leva a Saga a `CompensacaoFalhou`; o despachador avalia o prazo (índice esparso) e o relógio é injetável nos testes.
+- **Comando esgotado**: vai à DLQ com alerta e **não há reenvio automático** depois disso; a recuperação é intervenção humana. Um comando de compensação esgotado leva a `CompensacaoFalhou`; uma `ordem-servico.liberada.v1` esgotada deixa a Saga em `ExecucaoLiberada` até alguém agir.
+- **Ids das confirmações**: `correlacaoId`, `orcamentoId` e `execucaoId` informados devem coincidir com os da Saga; a divergência é rejeitada, registrada e alertada (`saga.mensagem-divergente`). O `execucaoId` é guardado quando o Execution o informa (`execucao.concluida.v1` ou `execucao.falhou.v1`).
+- **Motivo**: `ordem-servico.cancelar.v1` exige `motivo` de 1 a 2000 caracteres sem NUL; nos demais tipos o `motivo` é opcional, mas acima de 2000 caracteres ou com NUL a mensagem vai à DLQ. O motivo usado nos comandos de compensação é limitado a 2000 caracteres.
+- **Isolamento por Saga**: uma exceção ao progredir uma Saga (por exemplo, falha de leitura no DynamoDB) gera o alerta `saga.despacho-falhou` e o ciclo do despachador continua com as demais.
+- **Consumidor**: cada mensagem é processada com tempo limitado (`Saga__LimiteProcessamentoMensagem`, padrão 60 s) e, antes de processar, o visibility timeout dela é estendido para o dobro do limite; estourado o limite, a mensagem não é apagada e reaparece quando a visibilidade vence.
+- **Risco consciente**: mensagem fora de ordem (por exemplo, `pagamento.resultado.v1` `Capturado` antes de `execucao.concluida.v1`) é rejeitada e registrada, nunca reavaliada; o Billing evita o caso ao só cobrar com a OS `Concluida`. Um `orcamento.aprovado.v1` que chegue depois de a OS sem Saga ter sido cancelada pela rota cria a Saga normalmente e o fluxo avança.
 - **Pagamento capturado**: se a sincronização da OS falhar, a Saga segue para frente: retenta com backoff (teto de 5 minutos, sem desistir), alerta `saga.sincronizacao-os-falhou` a cada falha e **nunca** estorna nem desfaz o pagamento.
 - Os alertas são logs de erro estruturados com o campo `CodigoAlerta`; configure o ambiente de observabilidade para alertar por esses códigos.
 
@@ -138,6 +161,8 @@ O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md
 | `DynamoDb__ServiceUrl` | opcional; endpoint do DynamoDB Local em desenvolvimento e teste |
 | `DynamoDb__TabelaSaga`, `DynamoDb__TabelaEventos` | nomes das tabelas (padrão `autoreparos-os-saga` e `autoreparos-os-saga-eventos`) |
 | `DynamoDb__CriarTabelas` | `true` cria as tabelas e o índice se não existirem (apenas ambiente local e de teste) |
+| `Saga__PrazoCompensacao` | prazo para a confirmação de cada compensação (padrão `00:15:00`; deve ser maior que zero) |
+| `Saga__LimiteProcessamentoMensagem` | tempo máximo para processar cada mensagem da fila da Saga (padrão `00:01:00`) |
 | `AWS_REGION` | região da AWS |
 
 O provisionamento real do DynamoDB e das filas (capacidade, backup, alarmes, TTL) fica com a feature de infraestrutura (`infra-ci-observabilidade`); `DynamoDb__CriarTabelas` não deve ser usado em produção. Credenciais vêm da cadeia padrão da AWS, nunca do repositório.
