@@ -12,6 +12,9 @@ namespace AutoReparos.OS.Domain;
 /// </summary>
 public sealed class SagaOS
 {
+    /// <summary>Limite de caracteres do motivo (o Execution rejeita mais que isto); comandos de compensação o respeitam.</summary>
+    public const int MotivoMaximo = 2000;
+
     private static readonly JsonSerializerOptions JsonComando = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     [JsonInclude] public Guid OrdemServicoId { get; private set; }
@@ -21,6 +24,12 @@ public sealed class SagaOS
     [JsonInclude] public DateTimeOffset CriadoEm { get; private set; }
     [JsonInclude] public DateTimeOffset AtualizadoEm { get; private set; }
     [JsonInclude] public string? MotivoCompensacao { get; private set; }
+    /// <summary>Id da execução informado pelo Execution (concluída ou falhou); as confirmações devem coincidir.</summary>
+    [JsonInclude] public Guid? ExecucaoId { get; private set; }
+    /// <summary>Quando o comando de compensação em andamento foi emitido (reinicia a cada etapa compensada).</summary>
+    [JsonInclude] public DateTimeOffset? CompensacaoEmitidaEm { get; private set; }
+    /// <summary>Prazo para a confirmação da compensação em andamento; vencido, a Saga vai a <c>CompensacaoFalhou</c>.</summary>
+    [JsonInclude] public DateTimeOffset? PrazoCompensacaoEm { get; private set; }
     [JsonInclude] public List<EtapaSaga> Etapas { get; private set; } = [];
     [JsonInclude] public List<ComandoSaga> Comandos { get; private set; } = [];
     /// <summary>Status da OS ainda não sincronizados no Postgres, em ordem. A sincronização nunca desfaz pagamento.</summary>
@@ -34,7 +43,8 @@ public sealed class SagaOS
     [JsonIgnore] public long Versao { get; private set; }
 
     [JsonIgnore] public bool Terminal => Estado is EstadoSaga.PagamentoCapturado or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou;
-    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente);
+    [JsonIgnore] public bool AguardaPrazoCompensacao => Estado == EstadoSaga.Compensando && PrazoCompensacaoEm is not null;
+    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao;
 
     [JsonConstructor]
     private SagaOS() { }
@@ -78,7 +88,7 @@ public sealed class SagaOS
             return Rejeitar(agora, TiposMensagem.ExecucaoConcluida, eventId, $"Transição inválida a partir de {Estado}.");
         Estado = EstadoSaga.ExecucaoConcluida;
         Etapa(3).Marcar(SituacaoEtapa.Concluida, agora);
-        SincronizacoesPendentes.Add(StatusOS.ServicoConcluido);
+        SincronizacoesPendentes.Add(StatusOS.Concluida);
         return Aceitar(agora, TiposMensagem.ExecucaoConcluida, eventId, "Execução concluída; aguardando pagamento.");
     }
 
@@ -126,6 +136,7 @@ public sealed class SagaOS
         if (Estado is EstadoSaga.Compensando or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou)
             return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento ignorado: Saga já está em {Estado}.");
         Registrar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento solicitado: {motivo ?? "não informado"}.");
+        DescartarLiberadaPendente(agora);
         IniciarCompensacao(agora, motivo ?? "cancelamento solicitado");
         return Transicao.Ok;
     }
@@ -156,24 +167,56 @@ public sealed class SagaOS
         return new Transicao(true, null, "saga.compensacao-falhou");
     }
 
+    /// <summary>Mensagem cujos ids (<c>correlacaoId</c>, <c>orcamentoId</c>, <c>execucaoId</c>) não coincidem com os da Saga: rejeitada com alerta.</summary>
+    public Transicao RejeitarDivergencia(string tipo, Guid eventId, string motivo, DateTimeOffset agora) =>
+        Rejeitar(agora, tipo, eventId, motivo, "saga.mensagem-divergente");
+
+    /// <summary>Guarda o id da execução na primeira vez em que o Execution o informa (concluída ou falhou).</summary>
+    public void DefinirExecucaoId(Guid? execucaoId)
+    {
+        if (execucaoId is { } id && ExecucaoId is null) ExecucaoId = id;
+    }
+
+    // ---- Prazo da compensação ----
+
+    /// <summary>Recalcula o prazo da compensação em andamento (nulo fora de <c>Compensando</c>); chamado antes de cada gravação.</summary>
+    public void ArmarPrazoCompensacao(TimeSpan prazo) =>
+        PrazoCompensacaoEm = Estado == EstadoSaga.Compensando && CompensacaoEmitidaEm is { } emitida ? emitida + prazo : null;
+
+    public bool CompensacaoSemResposta(DateTimeOffset agora) => AguardaPrazoCompensacao && PrazoCompensacaoEm <= agora;
+
+    /// <summary>Sem confirmação no prazo: a etapa em compensação falha e a Saga vai a <c>CompensacaoFalhou</c>. Devolve a etapa e o prazo vencido.</summary>
+    public (int Etapa, string Compensacao, DateTimeOffset Prazo) ExpirarCompensacao(DateTimeOffset agora)
+    {
+        var etapa = Etapas.Single(e => e.Situacao == SituacaoEtapa.Compensando);
+        var prazo = PrazoCompensacaoEm!.Value;
+        var comando = Comandos.LastOrDefault(c => c.EtapaCompensada == etapa.Numero);
+        FalharCompensacao(etapa.Numero, comando?.EventId ?? Guid.Empty, "saga.compensacao-sem-resposta",
+            $"Sem confirmação do participante até {Formatar(prazo)} (prazo vencido).", agora);
+        PrazoCompensacaoEm = null;
+        return (etapa.Numero, etapa.Compensacao!, prazo);
+    }
+
     // ---- Progressão interna (sincronização da OS e despacho de comandos) ----
 
     public bool SincronizacaoDevida(DateTimeOffset agora) =>
         SincronizacoesPendentes.Count > 0 && (ProximaSincronizacaoEm is null || ProximaSincronizacaoEm <= agora);
 
+    /// <summary>Comandos saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).</summary>
     public ComandoSaga? ProximoComandoDevido(DateTimeOffset agora) =>
-        Comandos.FirstOrDefault(c => c.Pendente && (c.ProximaTentativaEm is null || c.ProximaTentativaEm <= agora));
+        Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro && (primeiro.ProximaTentativaEm is null || primeiro.ProximaTentativaEm <= agora) ? primeiro : null;
 
-    /// <summary>Menor instante em que há trabalho a fazer (sincronização ou comando); nulo se não há pendência.</summary>
+    /// <summary>Menor instante em que há trabalho a fazer (sincronização, primeiro comando pendente ou prazo da compensação); nulo se não há pendência.</summary>
     public DateTimeOffset? ProximoTrabalhoEm()
     {
         DateTimeOffset? menor = null;
-        if (SincronizacoesPendentes.Count > 0) menor = ProximaSincronizacaoEm ?? DateTimeOffset.MinValue;
-        foreach (var c in Comandos.Where(c => c.Pendente))
+        void Considerar(DateTimeOffset quando)
         {
-            var quando = c.ProximaTentativaEm ?? DateTimeOffset.MinValue;
             if (menor is null || quando < menor) menor = quando;
         }
+        if (SincronizacoesPendentes.Count > 0) Considerar(ProximaSincronizacaoEm ?? DateTimeOffset.MinValue);
+        if (Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
+        if (AguardaPrazoCompensacao) Considerar(PrazoCompensacaoEm!.Value);
         return menor;
     }
 
@@ -259,8 +302,39 @@ public sealed class SagaOS
         Registrar(agora, evento, eventId, $"Compensação da etapa {numeroEtapa} falhou: {erro}");
     }
 
+    /// <summary>O comando de liberação ainda não enviado (a execução não o recebeu): é descartado em vez de compensado.</summary>
+    private void DescartarLiberadaPendente(DateTimeOffset agora)
+    {
+        if (Estado != EstadoSaga.ExecucaoLiberada) return;
+        var liberada = Comandos.FirstOrDefault(c => c.Tipo == TiposMensagem.OrdemServicoLiberada && c.Pendente);
+        if (liberada is null) return;
+        liberada.MarcarDescartado(agora);
+        Etapa(2).Marcar(SituacaoEtapa.Pendente, agora);
+        var indice = SincronizacoesPendentes.IndexOf(StatusOS.EmExecucao);
+        if (indice >= 0)
+        {
+            SincronizacoesPendentes.RemoveAt(indice);
+            if (indice == 0)
+            {
+                TentativasSincronizacao = 0;
+                ProximaSincronizacaoEm = null;
+                UltimoErroSincronizacao = null;
+            }
+        }
+        Registrar(agora, "comando.descartado", liberada.EventId, "Cancelamento antes da entrega: o comando ordem-servico.liberada.v1 pendente foi descartado; a etapa 2 não é compensada.");
+    }
+
+    private static string Limitar(string texto)
+    {
+        if (texto.Length <= MotivoMaximo) return texto;
+        var corte = MotivoMaximo - 1;
+        if (char.IsHighSurrogate(texto[corte - 1])) corte--;
+        return texto[..corte] + "…";
+    }
+
     private void IniciarCompensacao(DateTimeOffset agora, string motivo)
     {
+        motivo = Limitar(motivo);
         Estado = EstadoSaga.Compensando;
         MotivoCompensacao = motivo;
         if (!EmitirProximaCompensacao(agora, motivo))
@@ -276,6 +350,7 @@ public sealed class SagaOS
         var etapa = Etapas.OrderByDescending(e => e.Numero).FirstOrDefault(e => e.Situacao == SituacaoEtapa.Concluida && e.Compensacao is not null);
         if (etapa is null) return false;
         etapa.Marcar(SituacaoEtapa.Compensando, agora);
+        CompensacaoEmitidaEm = agora;
         var id = Guid.NewGuid();
         var porExecucao = etapa.Numero == 2;
         var corpo = porExecucao

@@ -1,4 +1,5 @@
 using AutoReparos.OS.Application;
+using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Domain;
 using AutoReparos.OS.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -40,8 +41,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     options.Audience = builder.Configuration["Authentication:Audience"];
     options.RequireHttpsMetadata = builder.Configuration.GetValue("Authentication:RequireHttpsMetadata", true);
 });
-builder.Services.AddAuthorization(options => options.AddPolicy("OperarOS", policy =>
-    policy.RequireRole("Administrador", "Atendente", "Mecanico", "ServicoOS")));
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("OperarOS", policy => policy.RequireRole("Administrador", "Atendente", "Mecanico", "ServicoOS"));
+    options.AddPolicy("CancelarOS", policy => policy.RequireRole("Administrador", "Atendente"));
+});
 builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
 builder.Services.AddHostedService<PublicadorSqs>();
 builder.Services.AddSagaOS(builder.Configuration);
@@ -89,5 +93,17 @@ ordens.MapPatch("/{id:guid}", async (Guid id, HttpRequest http, IOrdemServicoRep
     }
     return Results.Ok(new { ordem.Id, ordem.Status, ordem.Observacao });
 });
+ordens.MapPost("/{id:guid}/cancelamento", async (Guid id, HttpRequest http, CancelamentoOrdemServico cancelamento, CancellationToken ct) =>
+{
+    var corpo = await CorpoJson.LerObjetoAsync(http, ct);
+    if (corpo is null || !CorpoJson.TentarLerMotivo(corpo.Value, out var motivo)) return CorpoJson.Invalido();
+    var resposta = await cancelamento.CancelarAsync(id, motivo, ct);
+    return resposta.Resultado switch
+    {
+        ResultadoCancelamento.NaoEncontrada => Results.NotFound(),
+        ResultadoCancelamento.Indisponivel => Results.Conflict(new { codigo = "cancelamento_indisponivel" }),
+        _ => Results.Accepted(value: new { ordemServicoId = resposta.OrdemServicoId, correlacaoId = resposta.CorrelacaoId, estado = resposta.Estado })
+    };
+}).RequireAuthorization("CancelarOS");
 app.Run();
 public partial class Program;

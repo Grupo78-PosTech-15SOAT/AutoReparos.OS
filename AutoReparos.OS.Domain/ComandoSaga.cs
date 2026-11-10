@@ -16,9 +16,11 @@ public sealed class ComandoSaga
     [JsonInclude] public DateTimeOffset? ProximaTentativaEm { get; private set; }
     [JsonInclude] public DateTimeOffset? EnviadoEm { get; private set; }
     [JsonInclude] public DateTimeOffset? EncaminhadoParaDlqEm { get; private set; }
+    /// <summary>Comando que nunca chegou a ser enviado e foi abandonado (cancelamento antes da entrega).</summary>
+    [JsonInclude] public DateTimeOffset? DescartadoEm { get; private set; }
     [JsonInclude] public string? UltimoErro { get; private set; }
 
-    [JsonIgnore] public bool Pendente => EnviadoEm is null && EncaminhadoParaDlqEm is null;
+    [JsonIgnore] public bool Pendente => EnviadoEm is null && EncaminhadoParaDlqEm is null && DescartadoEm is null;
 
     [JsonConstructor]
     private ComandoSaga() { }
@@ -51,6 +53,12 @@ public sealed class ComandoSaga
         Tentativas++;
         ProximaTentativaEm = proximaTentativaEm;
         UltimoErro = erro;
+    }
+
+    internal void MarcarDescartado(DateTimeOffset agora)
+    {
+        DescartadoEm = agora;
+        ProximaTentativaEm = null;
     }
 
     internal void MarcarEncaminhadoParaDlq(DateTimeOffset agora, string erro)

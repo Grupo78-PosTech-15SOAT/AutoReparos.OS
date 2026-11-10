@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AutoReparos.OS.Application.Saga;
 
 internal static class CorpoJson
 {
@@ -53,6 +54,16 @@ internal static class CorpoJson
         if (!TentarLerTexto(elemento, out valor)) return false;
         // O PostgreSQL rejeita o caractere NUL em text (erro 22021).
         return valor is null || (valor.Length <= LimiteObservacao && !valor.Contains((char)0));
+    }
+
+    /// <summary>O motivo do cancelamento é obrigatório: não vazio, até 2000 caracteres, sem NUL nem surrogate isolado.</summary>
+    public static bool TentarLerMotivo(JsonElement corpo, out string motivo)
+    {
+        motivo = string.Empty;
+        if (!Propriedade(corpo, "motivo", out var elemento) || elemento.ValueKind != JsonValueKind.String) return false;
+        if (!TentarLerTexto(elemento, out var texto) || !MensagemSaga.MotivoValido(texto)) return false;
+        motivo = texto!;
+        return true;
     }
 
     private static bool Propriedade(JsonElement corpo, string nome, out JsonElement elemento)

@@ -22,8 +22,11 @@ public enum SituacaoEtapa
     CompensacaoFalhou
 }
 
+/// <summary>Os sete valores de status de pagamento do Billing; só <see cref="Capturado"/> muda a etapa da Saga.</summary>
 public enum StatusPagamento
 {
+    SemTentativa,
+    Pendente,
     Capturado,
     Rejeitado,
     Cancelado,

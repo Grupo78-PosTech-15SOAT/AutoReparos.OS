@@ -10,6 +10,8 @@ public sealed class OpcoesSaga
     public TimeSpan AtrasoSincronizacaoMaximo { get; init; } = TimeSpan.FromMinutes(5);
     /// <summary>O jitter soma até esta fração do atraso exponencial.</summary>
     public double FatorJitter { get; init; } = 0.5;
+    /// <summary>Prazo para a confirmação de cada compensação; vencido, a Saga vai a <c>CompensacaoFalhou</c> com alerta (<c>Saga:PrazoCompensacao</c>).</summary>
+    public TimeSpan PrazoCompensacao { get; init; } = TimeSpan.FromMinutes(15);
     public int MaxConflitosVersao { get; init; } = 10;
     public Func<double> Aleatorio { get; init; } = () => Random.Shared.NextDouble();
     public Func<TimeSpan, CancellationToken, Task> Aguardar { get; init; } = (atraso, ct) => Task.Delay(atraso, ct);

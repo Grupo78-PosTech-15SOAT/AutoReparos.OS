@@ -16,8 +16,20 @@ public sealed record MensagemSaga(
     Guid? PagamentoId,
     StatusPagamento? ResultadoPagamento,
     string? Referencia,
-    string? Motivo)
+    string? Motivo,
+    Guid? ExecucaoId = null)
 {
+    /// <summary>Motivo válido: não vazio, até <see cref="SagaOS.MotivoMaximo"/> caracteres e sem o caractere NUL.</summary>
+    public static bool MotivoValido(string? motivo) =>
+        !string.IsNullOrWhiteSpace(motivo) && motivo.Length <= SagaOS.MotivoMaximo && !motivo.Contains((char)0);
+
+    /// <summary>Id determinístico do cancelamento de uma OS: repetir o pedido de cancelamento reaproveita o mesmo <c>eventId</c> (idempotente).</summary>
+    public static Guid EventIdCancelamento(Guid ordemServicoId)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{TiposMensagem.OrdemServicoCancelar}:{ordemServicoId:N}"));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
     public static bool TentarLer(string? json, out MensagemSaga? mensagem, out string erro)
     {
         mensagem = null;
@@ -49,8 +61,29 @@ public sealed record MensagemSaga(
                 ocorreuEm = data.ToUniversalTime();
             }
 
-            Guid? orcamentoId = null, clienteId = null, pagamentoId = null;
+            Guid? orcamentoId = null, clienteId = null, pagamentoId = null, execucaoId = null;
             StatusPagamento? status = null;
+            var motivo = Texto(raiz, "motivo");
+            if (tipo == TiposMensagem.OrdemServicoCancelar)
+            {
+                if (!MotivoValido(motivo)) { erro = $"motivo ausente ou inválido: informe de 1 a {SagaOS.MotivoMaximo} caracteres, sem o caractere NUL."; return false; }
+            }
+            else if (motivo is not null && (motivo.Length > SagaOS.MotivoMaximo || motivo.Contains((char)0)))
+            {
+                erro = $"motivo inválido: no máximo {SagaOS.MotivoMaximo} caracteres, sem o caractere NUL.";
+                return false;
+            }
+
+            if (tipo is TiposMensagem.ExecucaoConcluida or TiposMensagem.ExecucaoFalhou or TiposMensagem.ExecucaoCancelada or TiposMensagem.ExecucaoCancelamentoRecusado && Existe(raiz, "execucaoId"))
+            {
+                if (!Guid(raiz, "execucaoId", out var e) || e == System.Guid.Empty) { erro = "execucaoId inválido."; return false; }
+                execucaoId = e;
+            }
+            if (tipo is TiposMensagem.OrcamentoCancelado or TiposMensagem.OrcamentoCancelamentoRecusado && Existe(raiz, "orcamentoId"))
+            {
+                if (!Guid(raiz, "orcamentoId", out var o2) || o2 == System.Guid.Empty) { erro = "orcamentoId inválido."; return false; }
+                orcamentoId = o2;
+            }
             switch (tipo)
             {
                 case TiposMensagem.OrcamentoAprovado:
@@ -68,7 +101,7 @@ public sealed record MensagemSaga(
                     break;
             }
 
-            mensagem = new MensagemSaga(eventId, tipo, ordemId, correlacao, ocorreuEm, orcamentoId, clienteId, pagamentoId, status, Texto(raiz, "referencia"), Texto(raiz, "motivo"));
+            mensagem = new MensagemSaga(eventId, tipo, ordemId, correlacao, ocorreuEm, orcamentoId, clienteId, pagamentoId, status, Texto(raiz, "referencia"), motivo, execucaoId);
             erro = string.Empty;
             return true;
         }

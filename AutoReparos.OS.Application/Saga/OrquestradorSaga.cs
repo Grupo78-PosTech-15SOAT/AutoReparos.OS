@@ -55,8 +55,12 @@ public sealed class OrquestradorSaga(
             }
             else
             {
-                transicao = Aplicar(saga, mensagem, agora);
+                transicao = Divergencia(saga, mensagem) is { } divergencia
+                    ? saga.RejeitarDivergencia(mensagem.Tipo, mensagem.EventId, divergencia, agora)
+                    : Aplicar(saga, mensagem, agora);
+                if (transicao.Aceita && mensagem.Tipo is TiposMensagem.ExecucaoConcluida or TiposMensagem.ExecucaoFalhou) saga.DefinirExecucaoId(mensagem.ExecucaoId);
             }
+            saga.ArmarPrazoCompensacao(opcoes.PrazoCompensacao);
 
             switch (await sagas.GravarAsync(saga, new EventoProcessado(mensagem.EventId, mensagem.Tipo), cancellationToken))
             {
@@ -71,6 +75,19 @@ public sealed class OrquestradorSaga(
             return transicao.Aceita ? ResultadoMensagem.Aplicada : ResultadoMensagem.Rejeitada;
         }
         throw new ConflitoSagaException(mensagem.OrdemServicoId);
+    }
+
+    /// <summary><c>correlacaoId</c>, <c>orcamentoId</c> e <c>execucaoId</c> informados devem coincidir com os da Saga.</summary>
+    private static string? Divergencia(SagaOS saga, MensagemSaga m)
+    {
+        if (m.Tipo == TiposMensagem.OrcamentoAprovado) return null;
+        if (m.CorrelacaoId is { } correlacao && correlacao != saga.CorrelacaoId)
+            return $"correlacaoId {correlacao} diverge do da Saga ({saga.CorrelacaoId}).";
+        if (m.OrcamentoId is { } orcamento && orcamento != saga.OrcamentoId)
+            return $"orcamentoId {orcamento} diverge do da Saga ({saga.OrcamentoId}).";
+        if (m.ExecucaoId is { } execucao && saga.ExecucaoId is { } conhecida && execucao != conhecida)
+            return $"execucaoId {execucao} diverge do da Saga ({conhecida}).";
+        return null;
     }
 
     private static Transicao Aplicar(SagaOS saga, MensagemSaga m, DateTimeOffset agora) => m.Tipo switch
@@ -99,10 +116,21 @@ public sealed class OrquestradorSaga(
             var saga = await sagas.ObterAsync(ordemServicoId, cancellationToken);
             if (saga is null || !saga.TemTrabalhoPendente) return;
             var agora = tempo.GetUtcNow();
-            if (saga.SincronizacaoDevida(agora)) await SincronizarAsync(saga, agora, cancellationToken);
+            if (saga.CompensacaoSemResposta(agora)) await ExpirarCompensacaoAsync(saga, agora, cancellationToken);
+            else if (saga.SincronizacaoDevida(agora)) await SincronizarAsync(saga, agora, cancellationToken);
             else if (saga.ProximoComandoDevido(agora) is { } comando) await DespacharAsync(saga, comando, agora, cancellationToken);
             else return;
         }
+    }
+
+    /// <summary>Compensação sem confirmação no prazo: a Saga vai a <c>CompensacaoFalhou</c> e o alerta pede intervenção.</summary>
+    private async Task ExpirarCompensacaoAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        var (etapa, compensacao, prazo) = saga.ExpirarCompensacao(agora);
+        if (await sagas.GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
+        alertador.Alertar("saga.compensacao-sem-resposta",
+            $"Compensação da etapa {etapa} ({compensacao}) sem confirmação até {prazo.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)}; " +
+            $"Saga da OS {saga.OrdemServicoId} em CompensacaoFalhou, intervenção necessária.", saga.OrdemServicoId);
     }
 
     private async Task SincronizarAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)

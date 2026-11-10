@@ -27,7 +27,10 @@ public static class SagaServiceCollectionExtensions
         services.AddSingleton<IOrdemServicoSincronizador, SincronizadorOrdemServico>();
         services.AddSingleton<IEnvioComandos, SqsEnvioComandos>();
         services.AddSingleton<IAlertador, AlertadorLog>();
-        services.AddSingleton(new OpcoesSaga());
+        var prazo = configuration.GetValue<TimeSpan?>("Saga:PrazoCompensacao");
+        if (prazo is { } p && p <= TimeSpan.Zero) throw new InvalidOperationException("Saga:PrazoCompensacao deve ser maior que zero.");
+        services.AddSingleton(prazo is { } valor ? new OpcoesSaga { PrazoCompensacao = valor } : new OpcoesSaga());
+        services.AddScoped<CancelamentoOrdemServico>();
         services.AddSingleton<OrquestradorSaga>();
         services.AddSingleton<ProcessadorMensagemSaga>();
         services.AddSingleton<DespachadorSaga>();
