@@ -58,6 +58,41 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
     }
 
     [Fact]
+    public async Task SagaPersistsBeforePublish_EveryCommandOfTheCancellationFlowIsStoredBeforeItIsSent()
+    {
+        var (id, _, _) = await CriarOSAsync();
+        var correlacao = Guid.NewGuid();
+        var orcamentoId = Guid.NewGuid();
+        var capturas = new List<(string Tipo, string Corpo, Dictionary<string, AttributeValue> Item)>();
+        Atual.Envio.AoEnviar = async (_, corpo) => capturas.Add((Json.Tipo(corpo), corpo, await ItemBrutoAsync(id)));
+
+        var (aprovado, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        await Atual.Processador.ProcessarAsync(aprovado, CancellationToken.None);
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, id, null, null, ("motivo", "cliente desistiu"));
+        await ReceberAsync(TiposMensagem.ExecucaoCancelada, id, null, null, ("execucaoId", Guid.NewGuid()));
+
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], capturas.Select(c => c.Tipo));
+        var estados = new[] { "ExecucaoLiberada", "Compensando", "Compensando" };
+        long versaoAnterior = 0;
+        for (var i = 0; i < capturas.Count; i++)
+        {
+            var (tipo, corpo, item) = capturas[i];
+            // No instante do envio de cada comando, o estado, o correlacaoId e o próprio comando (ainda não enviado) já estavam gravados.
+            Assert.Equal(estados[i], item["estado"].S);
+            Assert.Equal(correlacao.ToString(), item["correlacaoId"].S);
+            Assert.Equal("S", item["trabalhoPendente"].S);
+            var versao = long.Parse(item["versao"].N);
+            Assert.True(versao > versaoAnterior, $"a versão gravada deve crescer a cada comando ({tipo}: {versao} <= {versaoAnterior})");
+            versaoAnterior = versao;
+            var comandoGravado = Assert.Single(Json.Ler(item["documento"].S).GetProperty("comandos").EnumerateArray(), c => c.GetProperty("tipo").GetString() == tipo);
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, comandoGravado.GetProperty("enviadoEm").ValueKind);
+            Assert.Equal(corpo, comandoGravado.GetProperty("corpo").GetString());
+        }
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], (await SagaAsync(id)).Comandos.Select(c => c.Tipo));
+        Assert.All((await SagaAsync(id)).Comandos, c => Assert.NotNull(c.EnviadoEm));
+    }
+
+    [Fact]
     public async Task SagaPersistsBeforePublish_FailedSendLeavesTheCommandPersistedWithItsRetrySchedule()
     {
         Atual.Envio.Falha = (_, _) => new IOException("SQS fora do ar");
@@ -164,7 +199,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         var final = await SagaAsync(s.OrdemServicoId, reiniciado);
         Assert.Equal(EstadoSaga.PagamentoCapturado, final.Estado);
         Assert.Equal([SituacaoEtapa.Concluida, SituacaoEtapa.Concluida, SituacaoEtapa.Concluida, SituacaoEtapa.Concluida], final.Etapas.Select(e => e.Situacao));
-        await AssertOSAsync(s.OrdemServicoId, "Paga", "EmExecucao", "OrcamentoAprovado", "Paga", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Paga", "Concluida", "EmExecucao", "OrcamentoAprovado", "Paga", "Recebida");
     }
 
     [Fact]
@@ -176,7 +211,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         Controle.FalhasRestantes = 1;
         await ReceberAsync(TiposMensagem.PagamentoResultado, s.OrdemServicoId, null, null, ("pagamentoId", Guid.NewGuid()), ("status", "Capturado"));
         Assert.Equal(["Paga"], (await SagaAsync(s.OrdemServicoId)).SincronizacoesPendentes);
-        Assert.Equal("ServicoConcluido", (await OSAsync(s.OrdemServicoId)).Status);
+        Assert.Equal("Concluida", (await OSAsync(s.OrdemServicoId)).Status);
         Relogio.Avancar(TimeSpan.FromSeconds(2));
 
         var reiniciado = NovosComponentes();
@@ -205,7 +240,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         Assert.Equal(versaoAntes + 2, saga.Versao); // transição + sincronização; a duplicata não grava nada
         Assert.Equal(EstadoSaga.ExecucaoConcluida, saga.Estado);
         Assert.Single(Atual.Envio.Enviados);
-        await AssertOSAsync(s.OrdemServicoId, "ServicoConcluido", "EmExecucao", "OrcamentoAprovado", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Concluida", "Concluida", "EmExecucao", "OrcamentoAprovado", "Recebida");
         Assert.Equal(3, await EventosDeOSAsync(s.OrdemServicoId));
     }
 
@@ -239,9 +274,9 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         var saga = await SagaAsync(s.OrdemServicoId);
         Assert.Equal(EstadoSaga.ExecucaoConcluida, saga.Estado);
         Assert.Equal(6, saga.Versao);
-        Assert.Equal(["OS sincronizada para OrcamentoAprovado.", "OS sincronizada para EmExecucao.", "OS sincronizada para ServicoConcluido."], Sincronizacoes(saga));
+        Assert.Equal(["OS sincronizada para OrcamentoAprovado.", "OS sincronizada para EmExecucao.", "OS sincronizada para Concluida."], Sincronizacoes(saga));
         Assert.Single(saga.Registros, r => r.EventId == eventId && r.Evento == TiposMensagem.ExecucaoConcluida);
-        await AssertOSAsync(s.OrdemServicoId, "ServicoConcluido", "EmExecucao", "OrcamentoAprovado", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Concluida", "Concluida", "EmExecucao", "OrcamentoAprovado", "Recebida");
         Assert.Equal(3, await EventosDeOSAsync(s.OrdemServicoId));
     }
 

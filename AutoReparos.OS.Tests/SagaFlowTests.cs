@@ -23,7 +23,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(EstadoSaga.ExecucaoConcluida, saga.Estado);
         Assert.Equal(SituacaoEtapa.Concluida, saga.Etapa(3).Situacao);
         Assert.Equal(SituacaoEtapa.Pendente, saga.Etapa(4).Situacao);
-        await AssertOSAsync(s.OrdemServicoId, "ServicoConcluido", "EmExecucao", "OrcamentoAprovado", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Concluida", "Concluida", "EmExecucao", "OrcamentoAprovado", "Recebida");
         Assert.Single(Atual.Envio.Enviados);
     }
 
@@ -42,12 +42,14 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(SituacaoEtapa.Concluida, saga.Etapa(4).Situacao);
         Assert.Empty(saga.SincronizacoesPendentes);
         Assert.Contains(saga.Registros, r => r.Evento == TiposMensagem.PagamentoResultado && r.Descricao.EndsWith("Capturado (referência pix-123).", StringComparison.Ordinal));
-        await AssertOSAsync(s.OrdemServicoId, "Paga", "EmExecucao", "OrcamentoAprovado", "Paga", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Paga", "Concluida", "EmExecucao", "OrcamentoAprovado", "Paga", "Recebida");
         Assert.Single(Atual.Envio.Enviados);
         Assert.Empty(Atual.Alertas.Alertas);
     }
 
     [Theory]
+    [InlineData("SemTentativa")]
+    [InlineData("Pendente")]
     [InlineData("Rejeitado")]
     [InlineData("Cancelado")]
     [InlineData("Expirado")]
@@ -64,7 +66,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(EstadoSaga.ExecucaoConcluida, saga.Estado);
         Assert.Equal(SituacaoEtapa.Pendente, saga.Etapa(4).Situacao);
         Assert.EndsWith($"{status} (referência ref-9).", saga.Registros[^1].Descricao, StringComparison.Ordinal);
-        await AssertOSAsync(s.OrdemServicoId, "ServicoConcluido", "EmExecucao", "OrcamentoAprovado", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Concluida", "Concluida", "EmExecucao", "OrcamentoAprovado", "Recebida");
         Assert.Empty(Atual.Alertas.Alertas);
     }
 
@@ -89,13 +91,14 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
     public async Task SagaTransitions_ReExecutionAfterInterventionReachesTheConcludedState()
     {
         var s = await IniciarSagaAsync();
-        await ReceberAsync(TiposMensagem.ExecucaoFalhou, s.OrdemServicoId, null, null, ("execucaoId", Guid.NewGuid()), ("motivo", "peça indisponível"));
+        var execucaoId = Guid.NewGuid(); // a reexecução é a mesma ordem de execução: o id é estável
+        await ReceberAsync(TiposMensagem.ExecucaoFalhou, s.OrdemServicoId, null, null, ("execucaoId", execucaoId), ("motivo", "peça indisponível"));
         Assert.Equal(EstadoSaga.IntervencaoRequerida, (await SagaAsync(s.OrdemServicoId)).Estado);
 
-        await ReceberAsync(TiposMensagem.ExecucaoConcluida, s.OrdemServicoId, null, null, ("execucaoId", Guid.NewGuid()));
+        await ReceberAsync(TiposMensagem.ExecucaoConcluida, s.OrdemServicoId, null, null, ("execucaoId", execucaoId));
 
         Assert.Equal(EstadoSaga.ExecucaoConcluida, (await SagaAsync(s.OrdemServicoId)).Estado);
-        await AssertOSAsync(s.OrdemServicoId, "ServicoConcluido", "EmExecucao", "IntervencaoRequerida", "OrcamentoAprovado", "Recebida", "ServicoConcluido");
+        await AssertOSAsync(s.OrdemServicoId, "Concluida", "Concluida", "EmExecucao", "IntervencaoRequerida", "OrcamentoAprovado", "Recebida");
     }
 
     // ---- C4: compensações ----
@@ -329,6 +332,246 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         await AssertOSAsync(s.OrdemServicoId, "Cancelada", "Cancelada", "OrcamentoAprovado", "Recebida");
     }
 
+    // ---- Cancelamento: liberada pendente, ordem dos comandos, prazo e ids divergentes ----
+
+    private static bool EhLiberada(string corpo) => Json.Tipo(corpo) == "ordem-servico.liberada.v1";
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_CancellationDiscardsAPendingReleaseInsteadOfCompensatingIt()
+    {
+        Atual.Envio.Falha = (_, corpo) => EhLiberada(corpo) ? new IOException("SQS fora do ar") : null;
+        Controle.AplicaA = status => status == "EmExecucao";
+        Controle.FalhasRestantes = 100;
+        var s = await IniciarSagaAsync();
+        var antes = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.ExecucaoLiberada, antes.Estado);
+        Assert.True(Assert.Single(antes.Comandos).Pendente);
+        Assert.Equal(["EmExecucao"], antes.SincronizacoesPendentes);
+
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", "cliente desistiu"));
+
+        var saga = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.Compensando, saga.Estado);
+        Assert.Equal([SituacaoEtapa.Compensando, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente], saga.Etapas.Select(e => e.Situacao));
+        var liberada = saga.Comandos[0];
+        Assert.False(liberada.Pendente);
+        Assert.Equal(T0, liberada.DescartadoEm);
+        Assert.Null(liberada.EnviadoEm);
+        Assert.Equal(1, liberada.Tentativas);
+        Assert.Empty(saga.SincronizacoesPendentes);
+        Assert.Equal(0, saga.TentativasSincronizacao);
+        Assert.Single(saga.Registros, r => r.Evento == "comando.descartado" && r.EventId == liberada.EventId
+            && r.Descricao == "Cancelamento antes da entrega: o comando ordem-servico.liberada.v1 pendente foi descartado; a etapa 2 não é compensada.");
+        // A liberada nunca é reenviada; só a compensação da etapa 1 sai.
+        Assert.Equal(["ordem-servico.liberada.v1", "billing.orcamento.cancelar.v1"], Atual.Envio.Tentativas.Select(t => Json.Tipo(t.Corpo)));
+        Assert.Equal(["billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.DoesNotContain("execucao.cancelar.v1", Atual.Envio.TiposEnviados);
+
+        await ReceberAsync(TiposMensagem.OrcamentoCancelado, s.OrdemServicoId, null, null, ("orcamentoId", s.OrcamentoId));
+
+        var final = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.Compensada, final.Estado);
+        Assert.Equal([SituacaoEtapa.Compensada, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente], final.Etapas.Select(e => e.Situacao));
+        await AssertOSAsync(s.OrdemServicoId, "Cancelada", "Cancelada", "OrcamentoAprovado", "Recebida");
+        Relogio.Avancar(TimeSpan.FromHours(1));
+        Assert.Equal(0, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+        Assert.Equal(2, Atual.Envio.Tentativas.Count);
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_CancellationCommandNeverOvertakesAPendingCommandInBackoff()
+    {
+        Atual.Envio.Falha = (_, corpo) => EhLiberada(corpo) ? new IOException("SQS fora do ar") : null;
+        var s = await IniciarSagaAsync();
+        // A execução recebeu a liberada (a confirmação do envio se perdeu) e falhou: a liberada segue pendente em backoff.
+        await ReceberAsync(TiposMensagem.ExecucaoFalhou, s.OrdemServicoId, null, null, ("execucaoId", Guid.NewGuid()), ("motivo", "sem peça"));
+        Assert.True(Assert.Single((await SagaAsync(s.OrdemServicoId)).Comandos).Pendente);
+
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", "desistência"));
+
+        var saga = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.Compensando, saga.Estado);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1"], saga.Comandos.Select(c => c.Tipo));
+        Assert.Empty(Atual.Envio.Enviados);
+        Assert.Equal(["ordem-servico.liberada.v1"], Atual.Envio.Tentativas.Select(t => Json.Tipo(t.Corpo)));
+        Assert.Equal(T0.AddSeconds(1.25), saga.Comandos[0].ProximaTentativaEm);
+        Assert.Equal(0, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+
+        Atual.Envio.Falha = (_, _) => null;
+        Relogio.Avancar(TimeSpan.FromSeconds(1.25));
+        Assert.Equal(1, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.All((await SagaAsync(s.OrdemServicoId)).Comandos, c => Assert.False(c.Pendente));
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_CompensationWithoutConfirmationFailsAtTheDeadlineWithAnAlert()
+    {
+        var s = await IniciarSagaAsync();
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", "cliente desistiu"));
+        var emCompensacao = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.Compensando, emCompensacao.Estado);
+        Assert.Equal(T0.AddMinutes(15), emCompensacao.PrazoCompensacaoEm);
+        Assert.False(emCompensacao.Comandos[1].Pendente);
+        var item = await ItemBrutoAsync(s.OrdemServicoId);
+        Assert.Equal("S", item["trabalhoPendente"].S);
+        Assert.Equal("2026-11-10T12:15:00.0000000Z", item["proximaTentativaEm"].S);
+
+        Relogio.Avancar(TimeSpan.FromMinutes(14) + TimeSpan.FromSeconds(59));
+        Assert.Equal(0, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+        Assert.Equal(EstadoSaga.Compensando, (await SagaAsync(s.OrdemServicoId)).Estado);
+        Assert.Empty(Atual.Alertas.Alertas);
+
+        Relogio.Avancar(TimeSpan.FromSeconds(1));
+        Assert.Equal(1, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+
+        var saga = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(EstadoSaga.CompensacaoFalhou, saga.Estado);
+        Assert.True(saga.Terminal);
+        Assert.Null(saga.PrazoCompensacaoEm);
+        Assert.Equal([SituacaoEtapa.Concluida, SituacaoEtapa.CompensacaoFalhou, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente], saga.Etapas.Select(e => e.Situacao));
+        Assert.Equal("Sem confirmação do participante até 2026-11-10T12:15:00Z (prazo vencido).", saga.Etapa(2).ErroCompensacao);
+        var alerta = Assert.Single(Atual.Alertas.Alertas);
+        Assert.Equal("saga.compensacao-sem-resposta", alerta.Codigo);
+        Assert.Equal(s.OrdemServicoId, alerta.OrdemServicoId);
+        Assert.Equal($"Compensação da etapa 2 (execucao.cancelar.v1) sem confirmação até 2026-11-10T12:15:00Z; Saga da OS {s.OrdemServicoId} em CompensacaoFalhou, intervenção necessária.", alerta.Mensagem);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal("EmExecucao", (await OSAsync(s.OrdemServicoId)).Status);
+
+        // Estado terminal: nada mais a fazer, sem novo alerta; confirmação tardia é rejeitada.
+        Assert.Equal(0, await Atual.Despachador.ExecutarCicloAsync(CancellationToken.None));
+        var tardia = await ReceberAsync(TiposMensagem.ExecucaoCancelada, s.OrdemServicoId);
+        Assert.Equal(ResultadoMensagem.Rejeitada, tardia.Resultado);
+        Assert.Equal(EstadoSaga.CompensacaoFalhou, (await SagaAsync(s.OrdemServicoId)).Estado);
+        Assert.Single(Atual.Alertas.Alertas);
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_DeadlineIsConfigurableAndRestartsForEachCompensatedStage()
+    {
+        var curto = NovosComponentes(prazoCompensacao: TimeSpan.FromMinutes(2));
+        var s = await IniciarSagaAsync(curto);
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, curto, null, ("motivo", "desistência"));
+        Assert.Equal(T0.AddMinutes(2), (await SagaAsync(s.OrdemServicoId, curto)).PrazoCompensacaoEm);
+
+        Relogio.Avancar(TimeSpan.FromSeconds(90));
+        await ReceberAsync(TiposMensagem.ExecucaoCancelada, s.OrdemServicoId, curto, null, ("execucaoId", Guid.NewGuid()));
+        var etapa1 = await SagaAsync(s.OrdemServicoId, curto);
+        Assert.Equal(T0.AddSeconds(90).AddMinutes(2), etapa1.PrazoCompensacaoEm);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], curto.Envio.TiposEnviados);
+
+        // O prazo da etapa 2 (T0 + 2 min) já passou, mas o da etapa 1 reiniciou na confirmação.
+        Relogio.Avancar(TimeSpan.FromSeconds(90));
+        Assert.Equal(0, await curto.Despachador.ExecutarCicloAsync(CancellationToken.None));
+        Assert.Equal(EstadoSaga.Compensando, (await SagaAsync(s.OrdemServicoId, curto)).Estado);
+
+        Relogio.Avancar(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, await curto.Despachador.ExecutarCicloAsync(CancellationToken.None));
+
+        var saga = await SagaAsync(s.OrdemServicoId, curto);
+        Assert.Equal(EstadoSaga.CompensacaoFalhou, saga.Estado);
+        Assert.Equal([SituacaoEtapa.CompensacaoFalhou, SituacaoEtapa.Compensada, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente], saga.Etapas.Select(e => e.Situacao));
+        Assert.Equal("Sem confirmação do participante até 2026-11-10T12:03:30Z (prazo vencido).", saga.Etapa(1).ErroCompensacao);
+        var alerta = Assert.Single(curto.Alertas.Alertas);
+        Assert.Equal("saga.compensacao-sem-resposta", alerta.Codigo);
+        Assert.StartsWith("Compensação da etapa 1 (billing.orcamento.cancelar.v1) sem confirmação até 2026-11-10T12:03:30Z;", alerta.Mensagem);
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_ConfirmationWithTheSagaIdsIsAcceptedAndDivergentIdsAreRejectedWithAlert()
+    {
+        var s = await IniciarSagaAsync();
+        var execucaoId = Guid.NewGuid();
+        var outraCorrelacao = Guid.NewGuid();
+
+        // correlacaoId divergente
+        var (corpoCorrelacao, _) = Mensagem(TiposMensagem.ExecucaoConcluida, s.OrdemServicoId, outraCorrelacao, null, ("execucaoId", execucaoId));
+        var divergente = await Atual.Processador.ProcessarAsync(corpoCorrelacao, CancellationToken.None);
+        Assert.Equal(ResultadoMensagem.Rejeitada, divergente.Resultado);
+        Assert.Equal(EstadoSaga.ExecucaoLiberada, (await SagaAsync(s.OrdemServicoId)).Estado);
+        var alertaCorrelacao = Assert.Single(Atual.Alertas.Alertas);
+        Assert.Equal("saga.mensagem-divergente", alertaCorrelacao.Codigo);
+        Assert.Equal($"correlacaoId {outraCorrelacao} diverge do da Saga ({s.CorrelacaoId}).", alertaCorrelacao.Mensagem);
+        var (corpoCerto, _) = Mensagem(TiposMensagem.ExecucaoFalhou, s.OrdemServicoId, s.CorrelacaoId, null, ("execucaoId", execucaoId), ("motivo", "sem peça"));
+        Assert.Equal(ResultadoMensagem.Aplicada, (await Atual.Processador.ProcessarAsync(corpoCerto, CancellationToken.None)).Resultado);
+        var guardada = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(execucaoId, guardada.ExecucaoId);
+
+        // execucaoId divergente do que o Execution já informou
+        var outraExecucao = Guid.NewGuid();
+        var concluidaOutra = await ReceberAsync(TiposMensagem.ExecucaoConcluida, s.OrdemServicoId, null, null, ("execucaoId", outraExecucao));
+        Assert.Equal(ResultadoMensagem.Rejeitada, concluidaOutra.Resultado);
+        Assert.Equal(EstadoSaga.IntervencaoRequerida, (await SagaAsync(s.OrdemServicoId)).Estado);
+        Assert.Equal($"execucaoId {outraExecucao} diverge do da Saga ({execucaoId}).", Atual.Alertas.Alertas[1].Mensagem);
+
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", "desistência"));
+        var recusaOutra = await ReceberAsync(TiposMensagem.ExecucaoCancelada, s.OrdemServicoId, null, null, ("execucaoId", outraExecucao));
+        Assert.Equal(ResultadoMensagem.Rejeitada, recusaOutra.Resultado);
+        Assert.Equal(SituacaoEtapa.Compensando, (await SagaAsync(s.OrdemServicoId)).Etapa(2).Situacao);
+        Assert.Equal("saga.mensagem-divergente", Atual.Alertas.Alertas[2].Codigo);
+        Assert.Equal(ResultadoMensagem.Aplicada, (await ReceberAsync(TiposMensagem.ExecucaoCancelada, s.OrdemServicoId, null, null, ("execucaoId", execucaoId))).Resultado);
+
+        // orcamentoId divergente na compensação da etapa 1
+        var outroOrcamento = Guid.NewGuid();
+        var orcamentoOutro = await ReceberAsync(TiposMensagem.OrcamentoCancelado, s.OrdemServicoId, null, null, ("orcamentoId", outroOrcamento));
+        Assert.Equal(ResultadoMensagem.Rejeitada, orcamentoOutro.Resultado);
+        Assert.Equal(EstadoSaga.Compensando, (await SagaAsync(s.OrdemServicoId)).Estado);
+        Assert.Equal($"orcamentoId {outroOrcamento} diverge do da Saga ({s.OrcamentoId}).", Atual.Alertas.Alertas[3].Mensagem);
+        var recusaOrcamentoOutro = await ReceberAsync(TiposMensagem.OrcamentoCancelamentoRecusado, s.OrdemServicoId, null, null, ("orcamentoId", outroOrcamento), ("motivo", "x"));
+        Assert.Equal(ResultadoMensagem.Rejeitada, recusaOrcamentoOutro.Resultado);
+        Assert.Equal(EstadoSaga.Compensando, (await SagaAsync(s.OrdemServicoId)).Estado);
+        Assert.Equal(5, Atual.Alertas.Alertas.Count);
+        Assert.All(Atual.Alertas.Alertas, a => Assert.Equal("saga.mensagem-divergente", a.Codigo));
+
+        var (corpoOrcamento, _) = Mensagem(TiposMensagem.OrcamentoCancelado, s.OrdemServicoId, s.CorrelacaoId, null, ("orcamentoId", s.OrcamentoId));
+        Assert.Equal(ResultadoMensagem.Aplicada, (await Atual.Processador.ProcessarAsync(corpoOrcamento, CancellationToken.None)).Resultado);
+        Assert.Equal(EstadoSaga.Compensada, (await SagaAsync(s.OrdemServicoId)).Estado);
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_RefusalReasonIsLimitedTo2000CharactersInTheCompensationCommand()
+    {
+        var s = await IniciarSagaAsync();
+        var motivo = new string('x', 2000);
+
+        await ReceberAsync(TiposMensagem.ExecucaoLiberacaoRecusada, s.OrdemServicoId, null, null, ("motivo", motivo));
+
+        var esperado = ($"Liberação recusada pelo Execution: {motivo}.")[..1999] + "…";
+        Assert.Equal(2000, esperado.Length);
+        var comando = Json.Ler(Atual.Envio.Enviados[1].Corpo);
+        Assert.Equal("billing.orcamento.cancelar.v1", comando.GetProperty("tipo").GetString());
+        Assert.Equal(esperado, comando.GetProperty("motivo").GetString());
+        Assert.Equal(esperado, (await SagaAsync(s.OrdemServicoId)).MotivoCompensacao);
+    }
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_ExceptionInOneSagaDoesNotAbortTheDispatcherCycleForTheOthers()
+    {
+        Atual.Envio.Falha = (_, _) => new IOException("SQS fora do ar");
+        var a = await IniciarSagaAsync();
+        Relogio.Avancar(TimeSpan.FromSeconds(1));
+        var b = await IniciarSagaAsync();
+        Relogio.Avancar(TimeSpan.FromSeconds(1));
+        var c = await IniciarSagaAsync();
+        Relogio.Avancar(TimeSpan.FromSeconds(10));
+        SagaRepositorioInstavel? instavel = null;
+        var reiniciado = NovosComponentes(r => instavel = new SagaRepositorioInstavel(r));
+        instavel!.LeituraComFalha.Add(a.OrdemServicoId); // a é a primeira da fila do índice: as demais vêm depois dela
+
+        var visitadas = await reiniciado.Despachador.ExecutarCicloAsync(CancellationToken.None);
+
+        Assert.Equal(3, visitadas);
+        Assert.Equal(2, reiniciado.Envio.Enviados.Count);
+        Assert.Equal(new[] { b.OrdemServicoId, c.OrdemServicoId }.Order(), reiniciado.Envio.Enviados.Select(e => Json.Ler(e.Corpo).GetProperty("ordemServicoId").GetGuid()).Order());
+        var alerta = Assert.Single(reiniciado.Alertas.Alertas);
+        Assert.Equal("saga.despacho-falhou", alerta.Codigo);
+        Assert.Equal(a.OrdemServicoId, alerta.OrdemServicoId);
+        Assert.Equal($"Falha ao progredir a Saga da OS {a.OrdemServicoId}: Documento da Saga ilegível (falha injetada). As demais Sagas seguem; o trabalho permanece persistido e será retomado no próximo ciclo.", alerta.Mensagem);
+        Assert.True(Assert.Single((await SagaAsync(a.OrdemServicoId)).Comandos).Pendente);
+        foreach (var x in new[] { b, c }) Assert.False(Assert.Single((await SagaAsync(x.OrdemServicoId)).Comandos).Pendente);
+    }
+
     // ---- C5: pagamento capturado e falha de sincronização ----
 
     [Fact]
@@ -350,7 +593,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(1, apos1.TentativasSincronizacao);
         Assert.Equal(T0.AddSeconds(1.25), apos1.ProximaSincronizacaoEm);
         Assert.Contains("falha injetada", apos1.UltimoErroSincronizacao);
-        Assert.Equal("ServicoConcluido", (await OSAsync(s.OrdemServicoId)).Status);
+        Assert.Equal("Concluida", (await OSAsync(s.OrdemServicoId)).Status);
         var primeiro = Assert.Single(Atual.Alertas.Alertas);
         Assert.Equal("saga.sincronizacao-os-falhou", primeiro.Codigo);
         Assert.Equal(s.OrdemServicoId, primeiro.OrdemServicoId);

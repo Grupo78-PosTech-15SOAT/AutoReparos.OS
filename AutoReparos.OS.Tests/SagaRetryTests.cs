@@ -75,6 +75,13 @@ public sealed class SagaRetryTests(SagaAmbiente ambiente) : SagaTestBase(ambient
     [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"orcamento.aprovado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"clienteId\":\"33333333-3333-3333-3333-333333333333\"}", "orcamentoId ausente ou inválido.")]
     [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"pagamento.resultado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"pagamentoId\":\"33333333-3333-3333-3333-333333333333\",\"status\":\"Estornado\"}", "status de pagamento inválido: Estornado.")]
     [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"execucao.concluida.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"ocorreuEm\":\"ontem\"}", "ocorreuEm inválido.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"pagamento.resultado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"pagamentoId\":\"33333333-3333-3333-3333-333333333333\",\"status\":\"capturado\"}", "status de pagamento inválido: capturado.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"pagamento.resultado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"pagamentoId\":\"33333333-3333-3333-3333-333333333333\",\"status\":\"Aprovado\"}", "status de pagamento inválido: Aprovado.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"pagamento.resultado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"pagamentoId\":\"33333333-3333-3333-3333-333333333333\",\"status\":\"2\"}", "status de pagamento inválido: 2.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"pagamento.resultado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"pagamentoId\":\"33333333-3333-3333-3333-333333333333\"}", "status de pagamento inválido: .")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"ordem-servico.cancelar.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"motivo\":\"\\ud800\"}", "motivo ausente ou inválido: informe de 1 a 2000 caracteres, sem o caractere NUL.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"execucao.cancelada.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"execucaoId\":\"nao-e-guid\"}", "execucaoId inválido.")]
+    [InlineData("{\"eventId\":\"22222222-2222-2222-2222-222222222222\",\"tipo\":\"orcamento.cancelado.v1\",\"ordemServicoId\":\"11111111-1111-1111-1111-111111111111\",\"orcamentoId\":\"nao-e-guid\"}", "orcamentoId inválido.")]
     public async Task RetryExhaustionDeadLetter_MalformedOrUnknownMessageGoesStraightToTheDeadLetterQueue(string corpo, string motivoEsperado)
     {
         var resultado = await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
@@ -89,6 +96,61 @@ public sealed class SagaRetryTests(SagaAmbiente ambiente) : SagaTestBase(ambient
         Assert.StartsWith($"Mensagem da Saga descartada para a DLQ: {motivoEsperado}", alerta.Mensagem, StringComparison.Ordinal);
         Assert.Equal(0, (await Dynamo.ScanAsync(new ScanRequest { TableName = TabelasDynamo.TabelaSaga })).Count);
         Assert.Equal(0, (await Dynamo.ScanAsync(new ScanRequest { TableName = TabelasDynamo.TabelaEventos })).Count);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a\0b")]
+    [InlineData("TAMANHO_2001")]
+    public async Task RetryExhaustionDeadLetter_CancellationMessageWithoutAValidReasonGoesStraightToTheDeadLetterQueue(string? motivo)
+    {
+        if (motivo == "TAMANHO_2001") motivo = new string('x', 2001);
+        var (id, _, _) = await CriarOSAsync();
+        var (corpo, _) = motivo is null
+            ? Mensagem(TiposMensagem.OrdemServicoCancelar, id)
+            : Mensagem(TiposMensagem.OrdemServicoCancelar, id, null, null, ("motivo", motivo));
+
+        var resultado = await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
+
+        Assert.Equal(new ResultadoProcessamento(DesfechoMensagem.EnviadaParaDlq, null, 0), resultado);
+        var dlq = Assert.Single(Atual.Envio.Dlq);
+        Assert.Equal(corpo, dlq.Corpo);
+        Assert.Equal("Mensagem inválida: motivo ausente ou inválido: informe de 1 a 2000 caracteres, sem o caractere NUL.", dlq.Motivo);
+        Assert.Equal(["saga.mensagem-invalida"], Atual.Alertas.Codigos);
+        Assert.Null(await Atual.Sagas.ObterAsync(id, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("execucao.falhou.v1", "a\0b")]
+    [InlineData("execucao.falhou.v1", "TAMANHO_2001")]
+    [InlineData("execucao.liberacao-recusada.v1", "TAMANHO_2001")]
+    [InlineData("orcamento.cancelamento-recusado.v1", "TAMANHO_2001")]
+    [InlineData("execucao.cancelamento-recusado.v1", "a\0b")]
+    public async Task RetryExhaustionDeadLetter_OptionalReasonAbove2000CharactersOrWithNulGoesStraightToTheDeadLetterQueue(string tipo, string motivo)
+    {
+        if (motivo == "TAMANHO_2001") motivo = new string('x', 2001);
+        var (corpo, _) = Mensagem(tipo, Guid.NewGuid(), null, null, ("motivo", motivo));
+
+        var resultado = await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
+
+        Assert.Equal(new ResultadoProcessamento(DesfechoMensagem.EnviadaParaDlq, null, 0), resultado);
+        Assert.Equal("Mensagem inválida: motivo inválido: no máximo 2000 caracteres, sem o caractere NUL.", Assert.Single(Atual.Envio.Dlq).Motivo);
+        Assert.Equal(["saga.mensagem-invalida"], Atual.Alertas.Codigos);
+    }
+
+    [Fact]
+    public async Task RetryExhaustionDeadLetter_ReasonOfExactly2000CharactersIsAccepted()
+    {
+        var s = await IniciarSagaAsync();
+        var motivo = new string('x', 2000);
+
+        var resultado = await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", motivo));
+
+        Assert.Equal(new ResultadoProcessamento(DesfechoMensagem.Processada, ResultadoMensagem.Aplicada, 1), resultado);
+        Assert.Equal(motivo, Json.Ler(Atual.Envio.Enviados[1].Corpo).GetProperty("motivo").GetString());
+        Assert.Empty(Atual.Envio.Dlq);
     }
 
     [Fact]

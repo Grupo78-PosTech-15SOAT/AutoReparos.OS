@@ -125,8 +125,11 @@ public sealed class SagaRepositorioInstavel(ISagaRepositorio inner) : ISagaRepos
 {
     public int FalhasRestantes;
     public int Chamadas;
+    /// <summary>Faz a leitura da Saga dessa OS falhar sempre (por exemplo, documento ilegível).</summary>
+    public HashSet<Guid> LeituraComFalha { get; } = [];
 
-    public Task<SagaOS?> ObterAsync(Guid ordemServicoId, CancellationToken cancellationToken) => inner.ObterAsync(ordemServicoId, cancellationToken);
+    public Task<SagaOS?> ObterAsync(Guid ordemServicoId, CancellationToken cancellationToken) =>
+        LeituraComFalha.Contains(ordemServicoId) ? throw new InvalidOperationException("Documento da Saga ilegível (falha injetada).") : inner.ObterAsync(ordemServicoId, cancellationToken);
 
     public Task<bool> EventoProcessadoAsync(Guid eventId, CancellationToken cancellationToken)
     {
@@ -197,16 +200,21 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
     }
 
     /// <summary>Instâncias novas sobre as mesmas tabelas: simula o reinício do processo.</summary>
-    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null)
+    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null, TimeSpan? prazoCompensacao = null)
     {
         envio ??= new EnvioFalso();
         var alertas = new AlertadorFalso();
-        var opcoes = new OpcoesSaga { Aleatorio = () => 0.5, Aguardar = (atraso, _) => { lock (Esperas) Esperas.Add(atraso); return Task.CompletedTask; } };
+        var opcoes = new OpcoesSaga
+        {
+            Aleatorio = () => 0.5,
+            Aguardar = (atraso, _) => { lock (Esperas) Esperas.Add(atraso); return Task.CompletedTask; },
+            PrazoCompensacao = prazoCompensacao ?? TimeSpan.FromMinutes(15)
+        };
         ISagaRepositorio sagas = new DynamoDbSagaRepositorio(Dynamo, TabelasDynamo, Relogio);
         if (decorar is not null) sagas = decorar(sagas);
         var sincronizador = new SincronizadorOrdemServico(Servicos.GetRequiredService<IServiceScopeFactory>());
         var orquestrador = new OrquestradorSaga(sagas, sincronizador, envio, alertas, Relogio, opcoes);
-        return new Componentes(envio, alertas, sagas, orquestrador, new ProcessadorMensagemSaga(orquestrador, envio, alertas, opcoes), new DespachadorSaga(sagas, orquestrador, Relogio));
+        return new Componentes(envio, alertas, sagas, orquestrador, new ProcessadorMensagemSaga(orquestrador, envio, alertas, opcoes), new DespachadorSaga(sagas, orquestrador, alertas, Relogio));
     }
 
     protected async Task<(Guid Id, Guid ClienteId, Guid VeiculoId)> CriarOSAsync()
