@@ -47,6 +47,9 @@ public interface IAlertador
 public interface IOrdemServicoSincronizador
 {
     Task<ResultadoSincronizacao> SincronizarStatusAsync(Guid ordemServicoId, string status, DateTimeOffset agora, CancellationToken cancellationToken);
+
+    /// <summary>Status atual da OS no Postgres; nulo se a OS não existe.</summary>
+    Task<string?> ObterStatusAsync(Guid ordemServicoId, CancellationToken cancellationToken);
 }
 
 public sealed class SagaInexistenteException(Guid ordemServicoId, string tipo)

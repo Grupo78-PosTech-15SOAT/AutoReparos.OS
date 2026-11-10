@@ -50,8 +50,20 @@ public sealed class OrquestradorSaga(
             if (saga is null)
             {
                 if (mensagem.Tipo != TiposMensagem.OrcamentoAprovado) throw new SagaInexistenteException(mensagem.OrdemServicoId, mensagem.Tipo);
-                saga = SagaOS.Iniciar(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora);
-                transicao = Transicao.Ok;
+                // OS cancelada pela rota antes de a Saga existir: não reativar; compensar o orçamento de imediato e alertar.
+                var jaCancelada = await ordens.ObterStatusAsync(mensagem.OrdemServicoId, cancellationToken) == StatusOS.Cancelada;
+                if (jaCancelada)
+                {
+                    saga = SagaOS.IniciarJaCancelada(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora);
+                    transicao = new Transicao(true,
+                        $"orcamento.aprovado.v1 recebido para a OS {mensagem.OrdemServicoId} já Cancelada: o orçamento será compensado e a OS não foi reativada.",
+                        "saga.orcamento-aprovado-apos-cancelamento");
+                }
+                else
+                {
+                    saga = SagaOS.Iniciar(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora);
+                    transicao = Transicao.Ok;
+                }
             }
             else
             {

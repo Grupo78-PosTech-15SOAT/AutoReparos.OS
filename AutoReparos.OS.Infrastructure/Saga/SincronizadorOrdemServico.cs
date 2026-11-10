@@ -13,4 +13,11 @@ public sealed class SincronizadorOrdemServico(IServiceScopeFactory scopes) : IOr
         var repositorio = scope.ServiceProvider.GetRequiredService<IOrdemServicoRepository>();
         return await repositorio.SincronizarStatusAsync(ordemServicoId, status, agora, cancellationToken);
     }
+
+    public async Task<string?> ObterStatusAsync(Guid ordemServicoId, CancellationToken cancellationToken)
+    {
+        using var scope = scopes.CreateScope();
+        var repositorio = scope.ServiceProvider.GetRequiredService<IOrdemServicoRepository>();
+        return (await repositorio.ObterAsync(ordemServicoId, cancellationToken))?.Status;
+    }
 }

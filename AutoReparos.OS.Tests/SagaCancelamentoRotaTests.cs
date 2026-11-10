@@ -153,6 +153,40 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
         Assert.Empty(Alertas.Alertas);
     }
 
+    // ---- Aprovação que chega depois do cancelamento ----
+
+    [Fact]
+    public async Task CompensatesEachFailedStage_ApprovalArrivingAfterCancellationCompensatesTheBudgetWithoutReactivatingTheOrder()
+    {
+        var id = await CriarOSPelaApiAsync();
+        using var cliente = Cliente();
+        await AssertAceitoAsync(await Cancelar(cliente, id, new { motivo = "cliente desistiu" }), id, null, "Cancelada");
+        Assert.Null(await Sagas.ObterAsync(id, CancellationToken.None));
+
+        var orcamentoId = await AprovarOrcamentoAsync(id);
+
+        var saga = await SagaAsync(id);
+        Assert.Equal(EstadoSaga.Compensando, saga.Estado);
+        Assert.Equal("Cancelada", await StatusOSAsync(id));
+        Assert.Equal([TiposMensagem.BillingOrcamentoCancelar], Envio.TiposEnviados);
+        var comando = Json.Ler(Envio.Enviados[0].Corpo);
+        Assert.Equal(DestinoComando.Billing, Envio.Enviados[0].Destino);
+        Assert.Equal(orcamentoId, comando.GetProperty("orcamentoId").GetGuid());
+        Assert.Equal(saga.CorrelacaoId, comando.GetProperty("correlacaoId").GetGuid());
+        var alerta = Assert.Single(Alertas.Alertas);
+        Assert.Equal("saga.orcamento-aprovado-apos-cancelamento", alerta.Codigo);
+        Assert.Equal(id, alerta.OrdemServicoId);
+
+        await ReceberAsync(TiposMensagem.OrcamentoCancelado, id, ("orcamentoId", orcamentoId));
+
+        Assert.Equal(EstadoSaga.Compensada, (await SagaAsync(id)).Estado);
+        Assert.Equal("Cancelada", await StatusOSAsync(id));
+        Assert.Equal(["Cancelada", "Recebida"], (await HistoricoOSAsync(id)).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(StatusOS.OrcamentoAprovado, Controle.Chamadas);
+        Assert.DoesNotContain(TiposMensagem.OrdemServicoLiberada, Envio.TiposEnviados);
+        Assert.Single(Alertas.Alertas);
+    }
+
     // ---- Fluxo completo com Saga ----
 
     [Fact]

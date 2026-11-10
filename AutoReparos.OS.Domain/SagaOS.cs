@@ -73,6 +73,21 @@ public sealed class SagaOS
         return saga;
     }
 
+    /// <summary>
+    /// <c>orcamento.aprovado.v1</c> que chega com a OS já <c>Cancelada</c> (cancelada pela rota enquanto não havia Saga): a Saga
+    /// nasce equivalente a um <c>ordem-servico.cancelar.v1</c> imediato. A OS não é sincronizada para <c>OrcamentoAprovado</c>
+    /// (não é reativada) e a etapa 1 é compensada de imediato com <c>billing.orcamento.cancelar.v1</c>.
+    /// </summary>
+    public static SagaOS IniciarJaCancelada(Guid ordemServicoId, Guid orcamentoId, Guid? correlacaoId, Guid eventId, DateTimeOffset agora)
+    {
+        var saga = Iniciar(ordemServicoId, orcamentoId, correlacaoId, eventId, agora);
+        saga.SincronizacoesPendentes.Clear();
+        const string motivo = "orçamento aprovado após o cancelamento da OS";
+        saga.Registrar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento aplicado na criação da Saga: {motivo}.");
+        saga.IniciarCompensacao(agora, motivo);
+        return saga;
+    }
+
     public void AplicarVersao(long versao) => Versao = versao;
 
     public EtapaSaga Etapa(int numero) => Etapas.Single(e => e.Numero == numero);
