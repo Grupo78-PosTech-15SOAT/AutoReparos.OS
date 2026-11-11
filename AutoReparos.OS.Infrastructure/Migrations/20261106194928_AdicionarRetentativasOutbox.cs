@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace AutoReparos.Os.Infrastructure.Migrations
+namespace AutoReparos.OS.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class AdicionarRetentativasOutbox : Migration

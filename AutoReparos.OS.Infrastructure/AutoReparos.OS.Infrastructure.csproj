@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.110.2" />
-    <ProjectReference Include="..\AutoReparos.OS.Application\AutoReparos.Os.Application.csproj" />
+    <ProjectReference Include="..\AutoReparos.OS.Application\AutoReparos.OS.Application.csproj" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AutoReparos.OS.Api\AutoReparos.Os.Api.csproj" />
+    <ProjectReference Include="..\AutoReparos.OS.Api\AutoReparos.OS.Api.csproj" />
   </ItemGroup>
 
 </Project>

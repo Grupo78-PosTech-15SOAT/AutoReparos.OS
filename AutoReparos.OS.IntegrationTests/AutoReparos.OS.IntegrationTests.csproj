@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AutoReparos.OS.Infrastructure\AutoReparos.Os.Infrastructure.csproj" />
+    <ProjectReference Include="..\AutoReparos.OS.Infrastructure\AutoReparos.OS.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

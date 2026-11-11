@@ -8,7 +8,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace AutoReparos.Os.Infrastructure.Migrations
+namespace AutoReparos.OS.Infrastructure.Migrations
 {
     [DbContext(typeof(OrdemServicoDbContext))]
     partial class OrdemServicoDbContextModelSnapshot : ModelSnapshot
