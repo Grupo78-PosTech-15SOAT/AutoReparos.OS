@@ -168,3 +168,23 @@ O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md
 O provisionamento real do DynamoDB e das filas (capacidade, backup, alarmes, TTL) fica com a feature de infraestrutura (`infra-ci-observabilidade`); `DynamoDb__CriarTabelas` não deve ser usado em produção. Credenciais vêm da cadeia padrão da AWS, nunca do repositório.
 
 Os testes (`dotnet test AutoReparos.OS.Tests`) usam DynamoDB Local e PostgreSQL via Testcontainers (Docker necessário) e um SQS falso. A documentação da Saga é verificada por `python scripts/assert_saga_readme.py --name saga-rationale --strategy orchestrated --state-store DynamoDB`; o teste do verificador roda com `python -m unittest discover -s scripts -p "test_*.py"`.
+
+## CI/CD e configuração do repositório
+
+O pipeline `.github/workflows/ci-cd.yml` roda em pull request para `main` e em push na `develop` e na `main`, com os jobs `build` (compila e confere `dotnet format`), `test` (testes de `AutoReparos.OS.Tests` e `AutoReparos.OS.Api.Tests`, cobertura mínima de linhas de 80%) e `quality` (SonarCloud).
+
+Para o job `quality` passar, o repositório precisa destes itens em **Settings → Secrets and variables → Actions**:
+
+| Nome | Onde criar | Obrigatório | Valor |
+| --- | --- | --- | --- |
+| `SONAR_TOKEN` | aba **Secrets** (do repositório ou da organização, com acesso a este repositório) | sim: sem ele o job `quality` falha de propósito | token gerado no SonarCloud em *My Account → Security*, por quem pode analisar os projetos da organização |
+| `SONAR_ORGANIZATION` | aba **Variables** | não | padrão `grupo78-postech-15soat` |
+| `SONAR_PROJECT_KEY` | aba **Variables** | não | padrão `Grupo78-PosTech-15SOAT_AutoReparos.OS` |
+
+O projeto `Grupo78-PosTech-15SOAT_AutoReparos.OS` precisa existir no SonarCloud (ou o token precisa poder criá-lo). Nunca versione o token. Depois de criar o secret, reexecute o job `quality` da última execução; não é preciso novo commit.
+
+Quando a proteção da `main` for aplicada (AD-026 do repositório pai), os jobs `build`, `test` e `quality` serão os status checks obrigatórios.
+
+O pipeline já define `AWS_REGION: us-east-1` no próprio `ci-cd.yml`; não é preciso configurar região no repositório.
+
+A prova `ServiceDatabaseIsolation` (`AutoReparos.OS.IntegrationTests`) depende de um ambiente de prova local (variáveis `OS_PROOF_*`) e **não roda no CI**.
