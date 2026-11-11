@@ -203,7 +203,7 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
         var resposta = await Cancelar(cliente, id, new { motivo = "cliente desistiu" });
 
         await AssertAceitoAsync(resposta, id, inicial.CorrelacaoId, "Compensando");
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         var comando = Json.Ler(Envio.Enviados[0].Corpo);
         Assert.Equal(DestinoComando.Billing, Envio.Enviados[0].Destino);
         Assert.Equal(orcamentoId, comando.GetProperty("orcamentoId").GetGuid());
@@ -219,10 +219,10 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
 
         Assert.Equal("Cancelada", await StatusOSAsync(id));
         Assert.Equal(["Cancelada", "OrcamentoAprovado", "Recebida"], (await HistoricoOSAsync(id)).Order(StringComparer.Ordinal));
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         // Repetir depois de compensada é idempotente: 202 com o estado final, sem novo comando.
         await AssertAceitoAsync(await Cancelar(cliente, id, new { motivo = "de novo" }), id, inicial.CorrelacaoId, "Compensada");
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         // Só os alertas da sincronização da OS que falhou de propósito; nenhum alerta da compensação.
         Assert.NotEmpty(Alertas.Alertas);
         Assert.All(Alertas.Codigos, codigo => Assert.Equal("saga.sincronizacao-os-falhou", codigo));
@@ -250,7 +250,7 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
         Assert.Equal(2, Envio.Enviados.Count);
 
         await ReceberAsync(TiposMensagem.ExecucaoCancelada, id, ("execucaoId", Guid.NewGuid()));
-        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         Assert.Equal(DestinoComando.Billing, Envio.Enviados[2].Destino);
         Assert.Equal(orcamentoId, Json.Ler(Envio.Enviados[2].Corpo).GetProperty("orcamentoId").GetGuid());
 
@@ -278,7 +278,7 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
         var resposta = await Cancelar(cliente, id, new { motivo = "cliente desistiu" });
 
         await AssertAceitoAsync(resposta, id, saga.CorrelacaoId, "Compensando");
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         var comandos = (await SagaAsync(id)).Comandos;
         Assert.False(comandos[0].Pendente);
         Assert.Equal(Relogio.Agora, comandos[0].DescartadoEm);
@@ -290,7 +290,7 @@ public sealed class SagaCancelamentoRotaTests(SagaAmbiente ambiente) : SagaRotaB
         Assert.Equal(0, await Despachador.ExecutarCicloAsync(CancellationToken.None));
 
         Assert.Equal(EstadoSaga.Compensada, (await SagaAsync(id)).Estado);
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Envio.TiposEnviados);
         Assert.Equal("Cancelada", await StatusOSAsync(id));
     }
 

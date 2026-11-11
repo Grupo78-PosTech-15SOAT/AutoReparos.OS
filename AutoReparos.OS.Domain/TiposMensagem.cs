@@ -16,7 +16,12 @@ public static class TiposMensagem
 
     public const string OrdemServicoLiberada = "ordem-servico.liberada.v1";
     public const string ExecucaoCancelar = "execucao.cancelar.v1";
-    public const string BillingOrcamentoCancelar = "billing.orcamento.cancelar.v1";
+    public const string CobrancaCancelarOrcamento = "cobranca.cancelar-orcamento.v1";
+    public const string BillingOrcamentoCancelarLegado = "billing.orcamento.cancelar.v1";
+    public const string BillingOrcamentoCancelar = CobrancaCancelarOrcamento;
+
+    public static string NormalizarComando(string tipo) =>
+        tipo == BillingOrcamentoCancelarLegado ? CobrancaCancelarOrcamento : tipo;
 
     public static readonly IReadOnlyList<string> Entrada =
     [

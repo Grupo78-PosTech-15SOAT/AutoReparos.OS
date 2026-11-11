@@ -89,7 +89,7 @@ A OS no Postgres acompanha cada transição, com histórico: `Recebida` → `Orc
 
 | Etapa | Compensação declarada |
 | --- | --- |
-| 1. Orçamento aprovado | `billing.orcamento.cancelar.v1` |
+| 1. Orçamento aprovado | `cobranca.cancelar-orcamento.v1` (normaliza etapas e comandos pendentes legados `billing.orcamento.cancelar.v1`) |
 | 2. Execução liberada | `execucao.cancelar.v1` |
 | 3. Execução concluída | nenhuma (só recuperação para frente) |
 | 4. Pagamento capturado | nenhuma: **nunca há estorno automático** |
@@ -131,7 +131,7 @@ Envelope JSON em camelCase: `eventId`, `tipo`, `correlacaoId`, `ordemServicoId`,
 | --- | --- | --- |
 | `ordem-servico.liberada.v1` | `Sqs__ExecucaoQueueUrl` | `id`, `clienteId`, `veiculoId` (lidos da OS) |
 | `execucao.cancelar.v1` | `Sqs__ExecucaoQueueUrl` | `motivo` |
-| `billing.orcamento.cancelar.v1` | `Sqs__BillingQueueUrl` | `orcamentoId`, `motivo` |
+| `cobranca.cancelar-orcamento.v1` | `Sqs__BillingQueueUrl` | `orcamentoId`, `motivo` (etapas/comandos persistidos com o alias legado `billing.orcamento.cancelar.v1` são normalizados antes do envio) |
 
 O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md` do repositório principal.
 

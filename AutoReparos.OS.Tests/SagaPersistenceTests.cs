@@ -71,7 +71,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         await ReceberAsync(TiposMensagem.OrdemServicoCancelar, id, null, null, ("motivo", "cliente desistiu"));
         await ReceberAsync(TiposMensagem.ExecucaoCancelada, id, null, null, ("execucaoId", Guid.NewGuid()));
 
-        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], capturas.Select(c => c.Tipo));
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "cobranca.cancelar-orcamento.v1"], capturas.Select(c => c.Tipo));
         var estados = new[] { "ExecucaoLiberada", "Compensando", "Compensando" };
         long versaoAnterior = 0;
         for (var i = 0; i < capturas.Count; i++)
@@ -88,7 +88,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
             Assert.Equal(System.Text.Json.JsonValueKind.Null, comandoGravado.GetProperty("enviadoEm").ValueKind);
             Assert.Equal(corpo, comandoGravado.GetProperty("corpo").GetString());
         }
-        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], (await SagaAsync(id)).Comandos.Select(c => c.Tipo));
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "cobranca.cancelar-orcamento.v1"], (await SagaAsync(id)).Comandos.Select(c => c.Tipo));
         Assert.All((await SagaAsync(id)).Comandos, c => Assert.NotNull(c.EnviadoEm));
     }
 
@@ -128,7 +128,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         Assert.NotEqual(Guid.Empty, saga.CorrelacaoId);
         Assert.Equal(orcamentoId, saga.OrcamentoId);
         Assert.Equal([SituacaoEtapa.Concluida, SituacaoEtapa.Concluida, SituacaoEtapa.Pendente, SituacaoEtapa.Pendente], saga.Etapas.Select(e => e.Situacao));
-        Assert.Equal(["billing.orcamento.cancelar.v1", "execucao.cancelar.v1", null, null], saga.Etapas.Select(e => e.Compensacao));
+        Assert.Equal(["cobranca.cancelar-orcamento.v1", "execucao.cancelar.v1", null, null], saga.Etapas.Select(e => e.Compensacao));
         Assert.Equal(saga.CorrelacaoId, Json.Ler(Atual.Envio.Enviados.Single().Corpo).GetProperty("correlacaoId").GetGuid());
         var evento = await Dynamo.GetItemAsync(TabelasDynamo.TabelaEventos, new Dictionary<string, AttributeValue> { ["eventId"] = new() { S = eventId.ToString() } });
         Assert.Equal("orcamento.aprovado.v1", evento.Item["tipo"].S);

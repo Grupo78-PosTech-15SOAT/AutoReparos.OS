@@ -1,3 +1,6 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace AutoReparos.OS.Domain;
@@ -5,6 +8,8 @@ namespace AutoReparos.OS.Domain;
 /// <summary>Comando persistido junto com a transição que o gerou; o despachador o publica depois.</summary>
 public sealed class ComandoSaga
 {
+    private static readonly JsonSerializerOptions JsonNormalizacao = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     [JsonInclude] public Guid EventId { get; private set; }
     [JsonInclude] public string Tipo { get; private set; } = string.Empty;
     [JsonInclude] public DestinoComando Destino { get; private set; }
@@ -66,6 +71,21 @@ public sealed class ComandoSaga
         EncaminhadoParaDlqEm = agora;
         ProximaTentativaEm = null;
         UltimoErro = erro;
+    }
+
+    internal void NormalizarTipo()
+    {
+        var novoTipo = TiposMensagem.NormalizarComando(Tipo);
+        Tipo = novoTipo;
+        if (JsonNode.Parse(Corpo) is JsonObject objeto && objeto.TryGetPropertyValue("tipo", out var noTipo) && noTipo?.GetValue<string>() is { } atual)
+        {
+            var normalizado = TiposMensagem.NormalizarComando(atual);
+            if (normalizado != atual)
+            {
+                objeto["tipo"] = normalizado;
+                Corpo = objeto.ToJsonString(JsonNormalizacao);
+            }
+        }
     }
 }
 

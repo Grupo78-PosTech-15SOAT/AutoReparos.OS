@@ -131,7 +131,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(EstadoSaga.Compensando, emCompensacao.Estado);
         Assert.Equal(SituacaoEtapa.Falhou, emCompensacao.Etapa(2).Situacao);
         Assert.Equal(SituacaoEtapa.Compensando, emCompensacao.Etapa(1).Situacao);
-        Assert.Equal(["ordem-servico.liberada.v1", "billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal(["ordem-servico.liberada.v1", "cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
         var comando = Atual.Envio.Enviados[1];
         Assert.Equal(DestinoComando.Billing, comando.Destino);
         Assert.Equal(["correlacaoId", "eventId", "motivo", "ocorreuEm", "orcamentoId", "ordemServicoId", "tipo"], Json.Chaves(comando.Corpo));
@@ -182,7 +182,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal(EstadoSaga.Compensando, apos2.Estado);
         Assert.Equal([SituacaoEtapa.Compensando, SituacaoEtapa.Compensada], apos2.Etapas.Take(2).Select(e => e.Situacao));
         Assert.Equal("confirmada", apos2.Etapa(2).ResultadoCompensacao);
-        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
         Assert.Equal(DestinoComando.Billing, Atual.Envio.Enviados[2].Destino);
         var cancelarBilling = Json.Ler(Atual.Envio.Enviados[2].Corpo);
         Assert.Equal(s.OrcamentoId, cancelarBilling.GetProperty("orcamentoId").GetGuid());
@@ -276,7 +276,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         var dlq = Assert.Single(Atual.Envio.Dlq);
         Assert.Equal(saga.Comandos[1].Corpo, dlq.Corpo);
         Assert.Equal(["saga.comando-esgotado", "saga.compensacao-falhou"], Atual.Alertas.Codigos);
-        Assert.DoesNotContain("billing.orcamento.cancelar.v1", Atual.Envio.TiposEnviados);
+        Assert.DoesNotContain("cobranca.cancelar-orcamento.v1", Atual.Envio.TiposEnviados);
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Empty(Atual.Envio.Tentativas);
 
         await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, null, ("motivo", "erro de cadastro"));
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
         await ReceberAsync(TiposMensagem.OrcamentoCancelado, s.OrdemServicoId);
 
         var compensada = await SagaAsync(s.OrdemServicoId);
@@ -328,7 +328,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         var final = await SagaAsync(s.OrdemServicoId);
         Assert.Empty(final.SincronizacoesPendentes);
         Assert.Equal(EstadoSaga.Compensada, final.Estado);
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
         await AssertOSAsync(s.OrdemServicoId, "Cancelada", "Cancelada", "OrcamentoAprovado", "Recebida");
     }
 
@@ -363,8 +363,8 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Single(saga.Registros, r => r.Evento == "comando.descartado" && r.EventId == liberada.EventId
             && r.Descricao == "Cancelamento antes da entrega: o comando ordem-servico.liberada.v1 pendente foi descartado; a etapa 2 não é compensada.");
         // A liberada nunca é reenviada; só a compensação da etapa 1 sai.
-        Assert.Equal(["ordem-servico.liberada.v1", "billing.orcamento.cancelar.v1"], Atual.Envio.Tentativas.Select(t => Json.Tipo(t.Corpo)));
-        Assert.Equal(["billing.orcamento.cancelar.v1"], Atual.Envio.TiposEnviados);
+        Assert.Equal(["ordem-servico.liberada.v1", "cobranca.cancelar-orcamento.v1"], Atual.Envio.Tentativas.Select(t => Json.Tipo(t.Corpo)));
+        Assert.Equal(["cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
         Assert.DoesNotContain("execucao.cancelar.v1", Atual.Envio.TiposEnviados);
 
         await ReceberAsync(TiposMensagem.OrcamentoCancelado, s.OrdemServicoId, null, null, ("orcamentoId", s.OrcamentoId));
@@ -459,7 +459,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         await ReceberAsync(TiposMensagem.ExecucaoCancelada, s.OrdemServicoId, curto, null, ("execucaoId", Guid.NewGuid()));
         var etapa1 = await SagaAsync(s.OrdemServicoId, curto);
         Assert.Equal(T0.AddSeconds(90).AddMinutes(2), etapa1.PrazoCompensacaoEm);
-        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "billing.orcamento.cancelar.v1"], curto.Envio.TiposEnviados);
+        Assert.Equal(["ordem-servico.liberada.v1", "execucao.cancelar.v1", "cobranca.cancelar-orcamento.v1"], curto.Envio.TiposEnviados);
 
         // O prazo da etapa 2 (T0 + 2 min) já passou, mas o da etapa 1 reiniciou na confirmação.
         Relogio.Avancar(TimeSpan.FromSeconds(90));
@@ -475,7 +475,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal("Sem confirmação do participante até 2026-11-10T12:03:30Z (prazo vencido).", saga.Etapa(1).ErroCompensacao);
         var alerta = Assert.Single(curto.Alertas.Alertas);
         Assert.Equal("saga.compensacao-sem-resposta", alerta.Codigo);
-        Assert.StartsWith("Compensação da etapa 1 (billing.orcamento.cancelar.v1) sem confirmação até 2026-11-10T12:03:30Z;", alerta.Mensagem);
+        Assert.StartsWith("Compensação da etapa 1 (cobranca.cancelar-orcamento.v1) sem confirmação até 2026-11-10T12:03:30Z;", alerta.Mensagem);
     }
 
     [Fact]
@@ -540,7 +540,7 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         var esperado = ($"Liberação recusada pelo Execution: {motivo}.")[..1999] + "…";
         Assert.Equal(2000, esperado.Length);
         var comando = Json.Ler(Atual.Envio.Enviados[1].Corpo);
-        Assert.Equal("billing.orcamento.cancelar.v1", comando.GetProperty("tipo").GetString());
+        Assert.Equal("cobranca.cancelar-orcamento.v1", comando.GetProperty("tipo").GetString());
         Assert.Equal(esperado, comando.GetProperty("motivo").GetString());
         Assert.Equal(esperado, (await SagaAsync(s.OrdemServicoId)).MotivoCompensacao);
     }
@@ -570,6 +570,116 @@ public sealed class SagaFlowTests(SagaAmbiente ambiente) : SagaTestBase(ambiente
         Assert.Equal($"Falha ao progredir a Saga da OS {a.OrdemServicoId}: Documento da Saga ilegível (falha injetada). As demais Sagas seguem; o trabalho permanece persistido e será retomado no próximo ciclo.", alerta.Mensagem);
         Assert.True(Assert.Single((await SagaAsync(a.OrdemServicoId)).Comandos).Pendente);
         foreach (var x in new[] { b, c }) Assert.False(Assert.Single((await SagaAsync(x.OrdemServicoId)).Comandos).Pendente);
+    }
+
+    // ---- C1 a C3 de eventos-portugues: comando em português e migração de etapas e comandos legados ----
+
+    [Fact]
+    public async Task NewCancellationCommandUsesPortugueseTypeAndPreservesEnvelope()
+    {
+        var s = await IniciarSagaAsync();
+
+        await ReceberAsync(TiposMensagem.ExecucaoLiberacaoRecusada, s.OrdemServicoId, null, null, ("motivo", "oficina lotada"));
+
+        var saga = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", saga.Etapa(1).Compensacao);
+        var comando = saga.Comandos[1];
+        Assert.Equal("cobranca.cancelar-orcamento.v1", comando.Tipo);
+        Assert.Equal(DestinoComando.Billing, comando.Destino);
+        Assert.Equal(1, comando.EtapaCompensada);
+        var enviado = Atual.Envio.Enviados[1];
+        Assert.Equal(DestinoComando.Billing, enviado.Destino);
+        Assert.Equal(comando.Corpo, enviado.Corpo);
+        Assert.DoesNotContain("billing.orcamento.cancelar.v1", enviado.Corpo, StringComparison.Ordinal);
+        Assert.Equal(["correlacaoId", "eventId", "motivo", "ocorreuEm", "orcamentoId", "ordemServicoId", "tipo"], Json.Chaves(enviado.Corpo));
+        var corpo = Json.Ler(enviado.Corpo);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", corpo.GetProperty("tipo").GetString());
+        Assert.Equal(comando.EventId, corpo.GetProperty("eventId").GetGuid());
+        Assert.Equal(s.CorrelacaoId, corpo.GetProperty("correlacaoId").GetGuid());
+        Assert.Equal(s.OrdemServicoId, corpo.GetProperty("ordemServicoId").GetGuid());
+        Assert.Equal(s.OrcamentoId, corpo.GetProperty("orcamentoId").GetGuid());
+        Assert.Equal("2026-11-10T12:00:00Z", corpo.GetProperty("ocorreuEm").GetString());
+        Assert.Equal("Liberação recusada pelo Execution: oficina lotada.", corpo.GetProperty("motivo").GetString());
+    }
+
+    [Fact]
+    public async Task LegacySagaStageGeneratesPortugueseCancellation()
+    {
+        var s = await IniciarSagaAsync();
+        var item = await ItemBrutoAsync(s.OrdemServicoId);
+        item["documento"].S = item["documento"].S.Replace("\"cobranca.cancelar-orcamento.v1\"", "\"billing.orcamento.cancelar.v1\"", StringComparison.Ordinal);
+        await Dynamo.PutItemAsync(TabelasDynamo.TabelaSaga, item);
+        Assert.Equal("billing.orcamento.cancelar.v1", (await SagaAsync(s.OrdemServicoId)).Etapa(1).Compensacao);
+
+        await ReceberAsync(TiposMensagem.ExecucaoLiberacaoRecusada, s.OrdemServicoId, null, null, ("motivo", "sem vaga"));
+
+        var saga = await SagaAsync(s.OrdemServicoId);
+        Assert.Equal(4, saga.Etapas.Count);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", saga.Etapa(1).Compensacao);
+        Assert.Equal(SituacaoEtapa.Compensando, saga.Etapa(1).Situacao);
+        var compensacoes = saga.Comandos.Where(c => c.EtapaCompensada == 1).ToList();
+        var comando = Assert.Single(compensacoes);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", comando.Tipo);
+        Assert.Equal(["ordem-servico.liberada.v1", "cobranca.cancelar-orcamento.v1"], Atual.Envio.TiposEnviados);
+        var corpo = Json.Ler(Atual.Envio.Enviados[1].Corpo);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", corpo.GetProperty("tipo").GetString());
+        Assert.Equal(comando.EventId, corpo.GetProperty("eventId").GetGuid());
+        Assert.Equal(s.CorrelacaoId, corpo.GetProperty("correlacaoId").GetGuid());
+        Assert.Equal(s.OrdemServicoId, corpo.GetProperty("ordemServicoId").GetGuid());
+        Assert.Equal(s.OrcamentoId, corpo.GetProperty("orcamentoId").GetGuid());
+        Assert.Equal("2026-11-10T12:00:00Z", corpo.GetProperty("ocorreuEm").GetString());
+        Assert.Equal("Liberação recusada pelo Execution: sem vaga.", corpo.GetProperty("motivo").GetString());
+    }
+
+    [Fact]
+    public async Task LegacyPendingCancellationIsNormalizedWithoutChangingEventId()
+    {
+        Atual.Envio.Falha = (destino, _) => destino == DestinoComando.Billing ? new IOException("SQS fora do ar") : null;
+        var s = await IniciarSagaAsync();
+        await ReceberAsync(TiposMensagem.ExecucaoLiberacaoRecusada, s.OrdemServicoId, null, null, ("motivo", "sem vaga"));
+        var antes = await SagaAsync(s.OrdemServicoId);
+        var pendenteOriginal = antes.Comandos[1];
+        Assert.True(pendenteOriginal.Pendente);
+        Assert.Equal(1, pendenteOriginal.Tentativas);
+        var eventIdOriginal = pendenteOriginal.EventId;
+        var proximaOriginal = pendenteOriginal.ProximaTentativaEm;
+
+        // Simula um comando pendente gravado antes da migração com o tipo antigo no registro e no JSON.
+        var item = await ItemBrutoAsync(s.OrdemServicoId);
+        item["documento"].S = item["documento"].S.Replace("cobranca.cancelar-orcamento.v1", "billing.orcamento.cancelar.v1", StringComparison.Ordinal);
+        await Dynamo.PutItemAsync(TabelasDynamo.TabelaSaga, item);
+        var legado = (await SagaAsync(s.OrdemServicoId)).Comandos[1];
+        Assert.Equal("billing.orcamento.cancelar.v1", legado.Tipo);
+        Assert.Equal("billing.orcamento.cancelar.v1", Json.Tipo(legado.Corpo));
+        Assert.Equal(eventIdOriginal, legado.EventId);
+
+        // Antes do horário de retry (1,25s) nada sai; depois o despachador envia na ordem, normalizando o tipo sem mudar o eventId.
+        var reiniciado = NovosComponentes();
+        Assert.Equal(0, await reiniciado.Despachador.ExecutarCicloAsync(CancellationToken.None));
+        Assert.Empty(reiniciado.Envio.Enviados);
+
+        Relogio.Avancar(proximaOriginal!.Value - Relogio.Agora);
+        Assert.Equal(1, await reiniciado.Despachador.ExecutarCicloAsync(CancellationToken.None));
+
+        var enviado = Assert.Single(reiniciado.Envio.Enviados);
+        Assert.Equal(DestinoComando.Billing, enviado.Destino);
+        Assert.DoesNotContain("billing.orcamento.cancelar.v1", enviado.Corpo, StringComparison.Ordinal);
+        Assert.Equal(["correlacaoId", "eventId", "motivo", "ocorreuEm", "orcamentoId", "ordemServicoId", "tipo"], Json.Chaves(enviado.Corpo));
+        var corpo = Json.Ler(enviado.Corpo);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", corpo.GetProperty("tipo").GetString());
+        Assert.Equal(eventIdOriginal, corpo.GetProperty("eventId").GetGuid());
+        Assert.Equal(s.CorrelacaoId, corpo.GetProperty("correlacaoId").GetGuid());
+        Assert.Equal(s.OrdemServicoId, corpo.GetProperty("ordemServicoId").GetGuid());
+        Assert.Equal(s.OrcamentoId, corpo.GetProperty("orcamentoId").GetGuid());
+        Assert.Equal("2026-11-10T12:00:00Z", corpo.GetProperty("ocorreuEm").GetString());
+        Assert.Equal("Liberação recusada pelo Execution: sem vaga.", corpo.GetProperty("motivo").GetString());
+
+        var depois = await SagaAsync(s.OrdemServicoId, reiniciado);
+        var gravado = depois.Comandos[1];
+        Assert.False(gravado.Pendente);
+        Assert.Equal(eventIdOriginal, gravado.EventId);
+        Assert.Equal("cobranca.cancelar-orcamento.v1", gravado.Tipo);
+        Assert.Equal(enviado.Corpo, gravado.Corpo);
     }
 
     // ---- C5: pagamento capturado e falha de sincronização ----

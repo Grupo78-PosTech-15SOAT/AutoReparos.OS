@@ -61,7 +61,7 @@ public sealed class SagaOS
             AtualizadoEm = agora,
             Etapas =
             [
-                new EtapaSaga(1, "Orçamento aprovado", TiposMensagem.BillingOrcamentoCancelar),
+                new EtapaSaga(1, "Orçamento aprovado", TiposMensagem.CobrancaCancelarOrcamento),
                 new EtapaSaga(2, "Execução liberada", TiposMensagem.ExecucaoCancelar),
                 new EtapaSaga(3, "Execução concluída", null),
                 new EtapaSaga(4, "Pagamento capturado", null)
@@ -218,8 +218,13 @@ public sealed class SagaOS
         SincronizacoesPendentes.Count > 0 && (ProximaSincronizacaoEm is null || ProximaSincronizacaoEm <= agora);
 
     /// <summary>Comandos saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).</summary>
-    public ComandoSaga? ProximoComandoDevido(DateTimeOffset agora) =>
-        Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro && (primeiro.ProximaTentativaEm is null || primeiro.ProximaTentativaEm <= agora) ? primeiro : null;
+    public ComandoSaga? ProximoComandoDevido(DateTimeOffset agora)
+    {
+        if (Comandos.FirstOrDefault(c => c.Pendente) is not { } primeiro || (primeiro.ProximaTentativaEm is not null && primeiro.ProximaTentativaEm > agora))
+            return null;
+        primeiro.NormalizarTipo();
+        return primeiro;
+    }
 
     /// <summary>Menor instante em que há trabalho a fazer (sincronização, primeiro comando pendente ou prazo da compensação); nulo se não há pendência.</summary>
     public DateTimeOffset? ProximoTrabalhoEm()
@@ -364,15 +369,16 @@ public sealed class SagaOS
     {
         var etapa = Etapas.OrderByDescending(e => e.Numero).FirstOrDefault(e => e.Situacao == SituacaoEtapa.Concluida && e.Compensacao is not null);
         if (etapa is null) return false;
+        var compensacao = etapa.NormalizarCompensacao();
         etapa.Marcar(SituacaoEtapa.Compensando, agora);
         CompensacaoEmitidaEm = agora;
         var id = Guid.NewGuid();
         var porExecucao = etapa.Numero == 2;
         var corpo = porExecucao
-            ? JsonSerializer.Serialize(new { eventId = id, tipo = etapa.Compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), motivo }, JsonComando)
-            : JsonSerializer.Serialize(new { eventId = id, tipo = etapa.Compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), orcamentoId = OrcamentoId, motivo }, JsonComando);
-        Comandos.Add(new ComandoSaga(id, etapa.Compensacao!, porExecucao ? DestinoComando.Execucao : DestinoComando.Billing, etapa.Numero, corpo, agora));
-        Registrar(agora, "saga.compensando", id, $"Compensação da etapa {etapa.Numero} ({etapa.Compensacao}) persistida.");
+            ? JsonSerializer.Serialize(new { eventId = id, tipo = compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), motivo }, JsonComando)
+            : JsonSerializer.Serialize(new { eventId = id, tipo = compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), orcamentoId = OrcamentoId, motivo }, JsonComando);
+        Comandos.Add(new ComandoSaga(id, compensacao, porExecucao ? DestinoComando.Execucao : DestinoComando.Billing, etapa.Numero, corpo, agora));
+        Registrar(agora, "saga.compensando", id, $"Compensação da etapa {etapa.Numero} ({compensacao}) persistida.");
         return true;
     }
 

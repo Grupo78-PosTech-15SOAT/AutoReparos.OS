@@ -30,6 +30,12 @@ public sealed class EtapaSaga
         AtualizadaEm = agora;
     }
 
+    internal string NormalizarCompensacao()
+    {
+        Compensacao = TiposMensagem.NormalizarComando(Compensacao!);
+        return Compensacao;
+    }
+
     internal void ConfirmarCompensacao(string resultado, DateTimeOffset agora)
     {
         Situacao = SituacaoEtapa.Compensada;
