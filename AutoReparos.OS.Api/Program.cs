@@ -119,7 +119,13 @@ admin.MapGet("/{ordemServicoId:guid}", async (Guid ordemServicoId, ConsoleSagas 
     var saga = await console.ObterAsync(ordemServicoId, ct);
     return saga is null ? Results.NotFound() : Results.Ok(new
     {
-        saga.OrdemServicoId, saga.CorrelacaoId, saga.OrcamentoId, estado = saga.Estado.ToString(), saga.MotivoCompensacao, saga.AtualizadoEm, saga.Itens,
+        saga.OrdemServicoId,
+        saga.CorrelacaoId,
+        saga.OrcamentoId,
+        estado = saga.Estado.ToString(),
+        saga.MotivoCompensacao,
+        saga.AtualizadoEm,
+        saga.Itens,
         etapas = saga.Etapas.Select(e => new { e.Numero, e.Nome, situacao = e.Situacao.ToString(), e.ResultadoCompensacao, e.ErroCompensacao }),
         comandos = saga.Comandos.Select(c => new { c.Tipo, destino = c.Destino.ToString(), c.EnviadoEm, c.Tentativas, c.UltimoErro }),
         saga.Registros
