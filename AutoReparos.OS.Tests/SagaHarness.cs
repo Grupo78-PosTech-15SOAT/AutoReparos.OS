@@ -140,6 +140,8 @@ public sealed class SagaRepositorioInstavel(ISagaRepositorio inner) : ISagaRepos
 
     public Task<ResultadoGravacao> GravarAsync(SagaOS saga, EventoProcessado? evento, CancellationToken cancellationToken) => inner.GravarAsync(saga, evento, cancellationToken);
 
+    public Task<IReadOnlyList<SagaOS>> ListarAsync(EstadoSaga? estado, DateTimeOffset? atualizadaAte, CancellationToken cancellationToken) => inner.ListarAsync(estado, atualizadaAte, cancellationToken);
+
     public Task<IReadOnlyList<Guid>> ListarComTrabalhoPendenteAsync(DateTimeOffset ate, CancellationToken cancellationToken) => inner.ListarComTrabalhoPendenteAsync(ate, cancellationToken);
 }
 

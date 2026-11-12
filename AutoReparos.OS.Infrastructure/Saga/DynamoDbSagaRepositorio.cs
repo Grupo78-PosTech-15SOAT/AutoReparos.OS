@@ -99,6 +99,35 @@ public sealed class DynamoDbSagaRepositorio(IAmazonDynamoDB dynamo, OpcoesDynamo
         return ResultadoGravacao.Gravada;
     }
 
+    public async Task<IReadOnlyList<SagaOS>> ListarAsync(EstadoSaga? estado, DateTimeOffset? atualizadaAte, CancellationToken cancellationToken)
+    {
+        var sagas = new List<SagaOS>();
+        Dictionary<string, AttributeValue>? proximo = null;
+        do
+        {
+            var filtros = new List<string>();
+            var valores = new Dictionary<string, AttributeValue>();
+            if (estado is { } e) { filtros.Add("estado = :estado"); valores[":estado"] = new AttributeValue { S = e.ToString() }; }
+            if (atualizadaAte is { } ate) { filtros.Add("atualizadoEm <= :ate"); valores[":ate"] = new AttributeValue { S = Formatar(ate) }; }
+            var requisicao = new ScanRequest { TableName = opcoes.TabelaSaga, ExclusiveStartKey = proximo, ConsistentRead = true };
+            if (filtros.Count > 0)
+            {
+                requisicao.FilterExpression = string.Join(" AND ", filtros);
+                requisicao.ExpressionAttributeValues = valores;
+                requisicao.ExpressionAttributeNames = null;
+            }
+            var resposta = await dynamo.ScanAsync(requisicao, cancellationToken);
+            foreach (var item in resposta.Items)
+            {
+                var saga = JsonSerializer.Deserialize<SagaOS>(item["documento"].S, Json)!;
+                saga.AplicarVersao(long.Parse(item["versao"].N, CultureInfo.InvariantCulture));
+                sagas.Add(saga);
+            }
+            proximo = resposta.LastEvaluatedKey is { Count: > 0 } ? resposta.LastEvaluatedKey : null;
+        } while (proximo is not null);
+        return [.. sagas.OrderBy(s => s.AtualizadoEm)];
+    }
+
     public async Task<IReadOnlyList<Guid>> ListarComTrabalhoPendenteAsync(DateTimeOffset ate, CancellationToken cancellationToken)
     {
         var ids = new List<Guid>();
