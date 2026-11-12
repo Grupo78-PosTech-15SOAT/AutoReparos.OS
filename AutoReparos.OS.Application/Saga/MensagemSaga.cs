@@ -17,8 +17,13 @@ public sealed record MensagemSaga(
     StatusPagamento? ResultadoPagamento,
     string? Referencia,
     string? Motivo,
-    Guid? ExecucaoId = null)
+    Guid? ExecucaoId = null,
+    IReadOnlyList<ItemReservaSaga>? Itens = null)
 {
+    /// <summary>Limites da reserva, os mesmos que a Execução aplica ao comando <c>execucao.reservar-insumos.v1</c>.</summary>
+    public const int ItensMaximos = 200;
+    public const int QuantidadeMaxima = 1_000;
+
     /// <summary>Motivo válido: não vazio, até <see cref="SagaOS.MotivoMaximo"/> caracteres e sem o caractere NUL.</summary>
     public static bool MotivoValido(string? motivo) =>
         !string.IsNullOrWhiteSpace(motivo) && motivo.Length <= SagaOS.MotivoMaximo && !motivo.Contains((char)0);
@@ -63,6 +68,7 @@ public sealed record MensagemSaga(
 
             Guid? orcamentoId = null, clienteId = null, pagamentoId = null, execucaoId = null;
             StatusPagamento? status = null;
+            List<ItemReservaSaga>? itens = null;
             var motivo = Texto(raiz, "motivo");
             if (tipo == TiposMensagem.OrdemServicoCancelar)
             {
@@ -91,6 +97,16 @@ public sealed record MensagemSaga(
                     if (!Guid(raiz, "clienteId", out var cl) || cl == System.Guid.Empty) { erro = "clienteId ausente ou inválido."; return false; }
                     orcamentoId = o;
                     clienteId = cl;
+                    // D-32: a Cobrança inclui os insumos do orçamento; sem o campo a Saga não sabe o que reservar (a mensagem vai à DLQ).
+                    if (!Propriedade(raiz, "itens", out var lista) || lista.ValueKind != JsonValueKind.Array || lista.GetArrayLength() > ItensMaximos) { erro = "itens ausente ou inválido."; return false; }
+                    itens = [];
+                    foreach (var elemento in lista.EnumerateArray())
+                    {
+                        if (elemento.ValueKind != JsonValueKind.Object || !Guid(elemento, "insumoId", out var insumoId) || insumoId == System.Guid.Empty
+                            || !Propriedade(elemento, "quantidade", out var q) || q.ValueKind != JsonValueKind.Number || !q.TryGetInt32(out var quantidade) || quantidade is < 1 or > QuantidadeMaxima)
+                        { erro = "item de insumo inválido."; return false; }
+                        itens.Add(new ItemReservaSaga(insumoId, quantidade));
+                    }
                     break;
                 case TiposMensagem.PagamentoResultado:
                     if (!Guid(raiz, "pagamentoId", out var p) || p == System.Guid.Empty) { erro = "pagamentoId ausente ou inválido."; return false; }
@@ -101,7 +117,7 @@ public sealed record MensagemSaga(
                     break;
             }
 
-            mensagem = new MensagemSaga(eventId, tipo, ordemId, correlacao, ocorreuEm, orcamentoId, clienteId, pagamentoId, status, Texto(raiz, "referencia"), motivo, execucaoId);
+            mensagem = new MensagemSaga(eventId, tipo, ordemId, correlacao, ocorreuEm, orcamentoId, clienteId, pagamentoId, status, Texto(raiz, "referencia"), motivo, execucaoId, itens);
             erro = string.Empty;
             return true;
         }

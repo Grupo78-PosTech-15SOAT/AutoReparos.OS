@@ -102,6 +102,7 @@ ordens.MapPost("/{id:guid}/cancelamento", async (Guid id, HttpRequest http, Canc
     {
         ResultadoCancelamento.NaoEncontrada => Results.NotFound(),
         ResultadoCancelamento.Indisponivel => Results.Conflict(new { codigo = "cancelamento_indisponivel" }),
+        ResultadoCancelamento.EmAndamento => Results.Conflict(new { codigo = "saga_em_andamento" }),
         _ => Results.Accepted(value: new { ordemServicoId = resposta.OrdemServicoId, correlacaoId = resposta.CorrelacaoId, estado = resposta.Estado })
     };
 }).RequireAuthorization("CancelarOS");

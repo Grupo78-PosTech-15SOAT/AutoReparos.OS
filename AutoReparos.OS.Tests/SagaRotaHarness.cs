@@ -108,7 +108,7 @@ public abstract class SagaRotaBase(SagaAmbiente ambiente) : IAsyncLifetime
     protected async Task<Guid> AprovarOrcamentoAsync(Guid ordemServicoId)
     {
         var orcamentoId = Guid.NewGuid();
-        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, ordemServicoId, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, ordemServicoId, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         Assert.Equal(DesfechoMensagem.Processada, resultado.Desfecho);
         return orcamentoId;
     }

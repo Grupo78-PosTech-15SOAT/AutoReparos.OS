@@ -248,7 +248,7 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
         var (id, clienteId, veiculoId) = await CriarOSAsync();
         var orcamentoId = Guid.NewGuid();
         var correlacao = correlacaoId ?? Guid.NewGuid();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         var resultado = await (em ?? Atual).Processador.ProcessarAsync(corpo, CancellationToken.None);
         Assert.Equal(DesfechoMensagem.Processada, resultado.Desfecho);
         return new SagaIniciada(id, orcamentoId, clienteId, veiculoId, correlacao);
