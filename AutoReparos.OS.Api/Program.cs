@@ -64,8 +64,9 @@ ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository,
         || !CorpoJson.TentarLerGuid(corpo.Value, "veiculoId", out var veiculoId) || veiculoId == Guid.Empty
         || !CorpoJson.TentarLerObservacao(corpo.Value, out _, out var observacao))
         return CorpoJson.Invalido();
-    // Cliente e veículo são do Cadastros: o JWT de quem abre a OS é repassado e 404 impede a abertura
-    var autorizacao = http.Headers.Authorization.ToString();
+    // Cliente e veículo são do Cadastros: o JWT de quem abre a OS é repassado e 404 impede a abertura.
+    // Contas de serviço (ServicoOS) não têm papel de oficina no Cadastros: sem usuário humano, usam a chave interna.
+    var autorizacao = http.HttpContext.User.IsInRole("ServicoOS") ? string.Empty : http.Headers.Authorization.ToString();
     ResultadoValidacaoCadastro validacao;
     try
     {

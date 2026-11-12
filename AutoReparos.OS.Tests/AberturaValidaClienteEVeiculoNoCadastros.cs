@@ -56,10 +56,10 @@ public sealed class AberturaValidaClienteEVeiculoNoCadastros : IAsyncLifetime
 
     public async Task DisposeAsync() { await factory.DisposeAsync(); await db.DisposeAsync(); }
 
-    private HttpClient Usuario(string? bearer = "token-do-usuario")
+    private HttpClient Usuario(string? bearer = "token-do-usuario", string papel = "Atendente")
     {
         var cliente = factory.CreateClient();
-        cliente.DefaultRequestHeaders.Add("X-Test-Role", "Atendente");
+        cliente.DefaultRequestHeaders.Add("X-Test-Role", papel);
         if (bearer is not null) cliente.DefaultRequestHeaders.Add("Authorization", $"Bearer {bearer}");
         return cliente;
     }
@@ -85,6 +85,40 @@ public sealed class AberturaValidaClienteEVeiculoNoCadastros : IAsyncLifetime
         {
             Assert.Equal("Bearer token-do-usuario", c.Authorization);
             Assert.Null(c.ChaveInterna);
+        });
+    }
+
+    [Theory]
+    [InlineData("Administrador")]
+    [InlineData("Atendente")]
+    [InlineData("Mecanico")]
+    public async Task PapeisDaOficina_RepassamOJwtDoUsuario(string papel)
+    {
+        var (cliente, veiculo) = cadastros.NovoClienteComVeiculo();
+
+        var resposta = await Abrir(Usuario(papel: papel), cliente, veiculo);
+
+        Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
+        Assert.All(cadastros.Chamadas, c =>
+        {
+            Assert.Equal("Bearer token-do-usuario", c.Authorization);
+            Assert.Null(c.ChaveInterna);
+        });
+    }
+
+    [Fact]
+    public async Task ContaDeServico_UsaAChaveInternaEmVezDoPropriJwt()
+    {
+        var (cliente, veiculo) = cadastros.NovoClienteComVeiculo();
+
+        var resposta = await Abrir(Usuario(papel: "ServicoOS"), cliente, veiculo);
+
+        Assert.Equal(HttpStatusCode.Created, resposta.StatusCode);
+        Assert.Equal(2, cadastros.Chamadas.Count);
+        Assert.All(cadastros.Chamadas, c =>
+        {
+            Assert.Null(c.Authorization);
+            Assert.Equal(ChaveInterna, c.ChaveInterna);
         });
     }
 
