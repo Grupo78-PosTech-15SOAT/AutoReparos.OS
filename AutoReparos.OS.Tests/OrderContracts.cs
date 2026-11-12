@@ -31,6 +31,7 @@ public sealed class OrderContracts : IAsyncLifetime
             services.RemoveAll<DbContextOptions<OrdemServicoDbContext>>();
             services.RemoveAll<OrdemServicoDbContext>();
             services.AddDbContext<OrdemServicoDbContext>(o => o.UseNpgsql(db.GetConnectionString()));
+            services.AddSingleton<ICadastros, CadastrosAceitaTudo>();
             services.AddScoped<IOrdemServicoRepository>(sp => new GatedRepository(sp.GetRequiredService<OrdemServicoDbContext>(), gate));
             services.AddAuthentication(o => { o.DefaultAuthenticateScheme = "Test"; o.DefaultChallengeScheme = "Test"; }).AddScheme<AuthenticationSchemeOptions, TestAuth>("Test", _ => { });
         }));
