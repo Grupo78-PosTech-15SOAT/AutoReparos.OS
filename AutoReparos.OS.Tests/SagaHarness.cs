@@ -110,6 +110,7 @@ public sealed class RepositorioOSComFalha(OrdemServicoDbContext inner, ControleS
     public Task AdicionarAsync(OrdemServico ordem, CancellationToken cancellationToken) => inner.AdicionarAsync(ordem, cancellationToken);
     public Task<OrdemServico?> ObterAsync(Guid id, CancellationToken cancellationToken) => inner.ObterAsync(id, cancellationToken);
     public Task SalvarAsync(CancellationToken cancellationToken) => inner.SalvarAsync(cancellationToken);
+    public Task<PaginaOS> ListarAsync(string? status, int pagina, int tamanho, CancellationToken cancellationToken) => inner.ListarAsync(status, pagina, tamanho, cancellationToken);
 
     public Task<ResultadoSincronizacao> SincronizarStatusAsync(Guid id, string status, DateTimeOffset agora, CancellationToken cancellationToken)
     {

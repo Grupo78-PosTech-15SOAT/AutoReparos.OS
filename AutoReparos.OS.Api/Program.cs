@@ -44,6 +44,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("OperarOS", policy => policy.RequireRole("Administrador", "Atendente", "Mecanico", "ServicoOS"));
+    options.AddPolicy("ListarOS", policy => policy.RequireRole("Administrador", "Atendente", "Mecanico"));
     options.AddPolicy("CancelarOS", policy => policy.RequireRole("Administrador", "Atendente"));
     options.AddPolicy("AdministrarSagas", policy => policy.RequireRole("Administrador"));
 });
@@ -88,6 +89,16 @@ ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository,
     await repository.SalvarAsync(ct);
     return Results.Created($"/api/v1/ordens-servico/{ordem.Id}", new { ordem.Id, ordem.Status });
 });
+ordens.MapGet("/", async (string? status, string? pagina, string? tamanho, IOrdemServicoRepository repository, CancellationToken ct) =>
+{
+    var filtro = string.IsNullOrEmpty(status) ? null : status;
+    if ((filtro is not null && !StatusOS.Todos.Contains(filtro))
+        || !CorpoJson.TentarLerPagina(pagina, 1, 1_000_000, 1, out var numeroPagina)
+        || !CorpoJson.TentarLerPagina(tamanho, 1, 100, 20, out var tamanhoPagina))
+        return Results.UnprocessableEntity(new { codigo = "filtro_invalido" });
+    var resultado = await repository.ListarAsync(filtro, numeroPagina, tamanhoPagina, ct);
+    return Results.Ok(new { resultado.Total, Itens = resultado.Itens.Select(i => new { i.Id, i.ClienteId, i.VeiculoId, i.Status, i.AtualizadaEm }) });
+}).RequireAuthorization("ListarOS");
 ordens.MapGet("/{id:guid}", async (Guid id, IOrdemServicoRepository repository, CancellationToken ct) =>
 {
     var ordem = await repository.ObterAsync(id, ct);
@@ -127,6 +138,12 @@ ordens.MapPost("/{id:guid}/cancelamento", async (Guid id, HttpRequest http, Canc
         _ => Results.Accepted(value: new { ordemServicoId = resposta.OrdemServicoId, correlacaoId = resposta.CorrelacaoId, estado = resposta.Estado })
     };
 }).RequireAuthorization("CancelarOS");
+// Consulta pública: só status e histórico, sem cliente nem veículo; o id imprevisível (GUID) é o único controle de acesso.
+app.MapGet("/api/v1/ordens-servico/{id:guid}/consulta", async (Guid id, IOrdemServicoRepository repository, CancellationToken ct) =>
+{
+    var ordem = await repository.ObterAsync(id, ct);
+    return ordem is null ? Results.NotFound() : Results.Ok(new { ordem.Id, ordem.Status, Historico = ordem.Historico.OrderBy(h => h.RegistradoEm).ThenBy(h => h.Id).Select(h => new { h.Status, Em = h.RegistradoEm }) });
+}).AllowAnonymous();
 var admin = app.MapGroup("/api/v1/admin/sagas").RequireAuthorization("AdministrarSagas");
 admin.MapGet("/", async (string? estado, int? paradaHaMinutos, ConsoleSagas console, CancellationToken ct) =>
 {

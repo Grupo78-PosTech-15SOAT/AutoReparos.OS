@@ -74,6 +74,14 @@ internal static class CorpoJson
             && elemento.TryGetInt32(out quantidade) && quantidade >= 1 && quantidade <= maximo;
     }
 
+    /// <summary>Inteiro da query string entre <paramref name="minimo"/> e <paramref name="maximo"/>; ausente vale <paramref name="padrao"/>.</summary>
+    public static bool TentarLerPagina(string? texto, int minimo, int maximo, int padrao, out int valor)
+    {
+        valor = padrao;
+        if (string.IsNullOrEmpty(texto)) return true;
+        return int.TryParse(texto, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out valor) && valor >= minimo && valor <= maximo;
+    }
+
     private static bool Propriedade(JsonElement corpo, string nome, out JsonElement elemento)
     {
         foreach (var propriedade in corpo.EnumerateObject())

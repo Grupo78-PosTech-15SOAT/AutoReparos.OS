@@ -29,6 +29,18 @@ public sealed class OrdemServicoDbContext(DbContextOptions<OrdemServicoDbContext
 
     public async Task AdicionarAsync(OrdemServico ordem, CancellationToken cancellationToken) => await OrdensServico.AddAsync(ordem, cancellationToken);
     public Task<OrdemServico?> ObterAsync(Guid id, CancellationToken cancellationToken) => OrdensServico.Include(x => x.Historico).SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public async Task<PaginaOS> ListarAsync(string? status, int pagina, int tamanho, CancellationToken cancellationToken)
+    {
+        var consulta = OrdensServico.AsNoTracking().Where(x => status == null || x.Status == status);
+        var total = await consulta.CountAsync(cancellationToken);
+        var itens = await consulta
+            .Select(x => new { x.Id, x.ClienteId, x.VeiculoId, x.Status, AtualizadaEm = x.Historico.Max(h => h.RegistradoEm) })
+            .OrderByDescending(x => x.AtualizadaEm).ThenBy(x => x.Id)
+            .Skip((pagina - 1) * tamanho).Take(tamanho)
+            .ToListAsync(cancellationToken);
+        return new PaginaOS(total, itens.ConvertAll(x => new ItemListaOS(x.Id, x.ClienteId, x.VeiculoId, x.Status, x.AtualizadaEm)));
+    }
+
     public async Task<ResultadoSincronizacao> SincronizarStatusAsync(Guid id, string status, DateTimeOffset agora, CancellationToken cancellationToken)
     {
         const int maxTentativas = 3;

@@ -333,6 +333,7 @@ public sealed class GatedRepository(OrdemServicoDbContext inner, ConcurrencyGate
 {
     public Task AdicionarAsync(OrdemServico ordem, CancellationToken cancellationToken) => inner.AdicionarAsync(ordem, cancellationToken);
     public Task SalvarAsync(CancellationToken cancellationToken) => inner.SalvarAsync(cancellationToken);
+    public Task<PaginaOS> ListarAsync(string? status, int pagina, int tamanho, CancellationToken cancellationToken) => inner.ListarAsync(status, pagina, tamanho, cancellationToken);
     public Task<ResultadoSincronizacao> SincronizarStatusAsync(Guid id, string status, DateTimeOffset agora, CancellationToken cancellationToken) => inner.SincronizarStatusAsync(id, status, agora, cancellationToken);
     public async Task<OrdemServico?> ObterAsync(Guid id, CancellationToken cancellationToken)
     {
