@@ -66,6 +66,14 @@ internal static class CorpoJson
         return true;
     }
 
+    /// <summary>Quantidade inteira entre 1 e <paramref name="maximo"/>.</summary>
+    public static bool TentarLerQuantidade(JsonElement corpo, int maximo, out int quantidade)
+    {
+        quantidade = 0;
+        return Propriedade(corpo, "quantidade", out var elemento) && elemento.ValueKind == JsonValueKind.Number
+            && elemento.TryGetInt32(out quantidade) && quantidade >= 1 && quantidade <= maximo;
+    }
+
     private static bool Propriedade(JsonElement corpo, string nome, out JsonElement elemento)
     {
         foreach (var propriedade in corpo.EnumerateObject())

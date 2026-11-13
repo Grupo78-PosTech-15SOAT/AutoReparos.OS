@@ -144,5 +144,12 @@ admin.MapPost("/{ordemServicoId:guid}/retentar", async (Guid ordemServicoId, Htt
         _ => Results.Accepted(value: new { ordemServicoId, passo = "reserva-de-insumos" })
     };
 });
+app.MapPost("/api/v1/admin/dlq/reprocessar", async (HttpContext http, ReprocessadorDlq reprocessador, CancellationToken ct) =>
+{
+    var corpo = await CorpoJson.LerObjetoAsync(http.Request, ct);
+    if (corpo is null || !CorpoJson.TentarLerQuantidade(corpo.Value, ReprocessadorDlq.QuantidadeMaxima, out var quantidade)) return Results.UnprocessableEntity(new { codigo = "quantidade_invalida" });
+    var autor = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? http.User.Identity?.Name ?? "desconhecido";
+    return Results.Ok(await reprocessador.ReprocessarAsync(quantidade, autor, ct));
+}).RequireAuthorization("AdministrarSagas");
 app.Run();
 public partial class Program;

@@ -38,6 +38,7 @@ public static class SagaServiceCollectionExtensions
         services.AddSingleton(new OpcoesSaga { PrazoCompensacao = prazo ?? padraoSaga.PrazoCompensacao, PrazoReserva = prazoReserva, PrazoLiberacao = prazoLiberacao, MaxReenvios = maxReenvios });
         services.AddScoped<CancelamentoOrdemServico>();
         services.AddSingleton<ConsoleSagas>();
+        services.AddSingleton<ReprocessadorDlq>();
         services.AddSingleton<OrquestradorSaga>();
         services.AddSingleton<ProcessadorMensagemSaga>();
         services.AddSingleton<DespachadorSaga>();
