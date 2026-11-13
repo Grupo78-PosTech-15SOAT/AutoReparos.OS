@@ -147,4 +147,20 @@ public sealed class SagaPrazosTests(SagaAmbiente ambiente) : SagaTestBase(ambien
         Assert.Equal(EstadoSaga.CompensacaoFalhou, (await SagaAsync(s.OrdemServicoId)).Estado);
         Assert.Equal("saga.compensacao-sem-resposta", Atual.Alertas.Codigos.Last());
     }
+
+    [Fact]
+    public async Task PrazoSemRespostaCompensa_ReservaUsaPrazoReservaELiberacaoUsaPrazoLiberacao()
+    {
+        Atual = NovosComponentes(prazoReserva: TimeSpan.FromMinutes(3), prazoLiberacao: TimeSpan.FromMinutes(5));
+        var s = await AprovarComInsumosAsync();
+        Assert.Equal(T0.AddMinutes(3), (await SagaAsync(s.OrdemServicoId)).PrazoPassoEm);
+
+        Atual.Envio.Falha = (_, corpo) => Json.Tipo(corpo) == "ordem-servico.liberada.v1" ? new InvalidOperationException("fila fora do ar") : null;
+        await ReceberAsync(TiposMensagem.InsumosReservados, s.OrdemServicoId, null, null, ("correlacaoId", s.CorrelacaoId), ("itens", Array.Empty<object>()));
+
+        // A liberação conta a partir da confirmação da reserva, com o prazo próprio.
+        Assert.Equal(T0.AddMinutes(5), (await SagaAsync(s.OrdemServicoId)).PrazoPassoEm);
+    }
+
+    private static readonly DateTimeOffset T0 = new(2026, 11, 10, 12, 0, 0, TimeSpan.Zero);
 }

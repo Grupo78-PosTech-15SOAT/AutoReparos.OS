@@ -202,7 +202,7 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
     }
 
     /// <summary>Instâncias novas sobre as mesmas tabelas: simula o reinício do processo.</summary>
-    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null, TimeSpan? prazoCompensacao = null, int maxReenvios = 0)
+    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null, TimeSpan? prazoCompensacao = null, int maxReenvios = 0, TimeSpan? prazoReserva = null, TimeSpan? prazoLiberacao = null)
     {
         envio ??= new EnvioFalso();
         var alertas = new AlertadorFalso();
@@ -211,7 +211,9 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
             Aleatorio = () => 0.5,
             Aguardar = (atraso, _) => { lock (Esperas) Esperas.Add(atraso); return Task.CompletedTask; },
             PrazoCompensacao = prazoCompensacao ?? TimeSpan.FromMinutes(15),
-            MaxReenvios = maxReenvios
+            MaxReenvios = maxReenvios,
+            PrazoReserva = prazoReserva ?? TimeSpan.FromMinutes(2),
+            PrazoLiberacao = prazoLiberacao ?? TimeSpan.FromMinutes(2)
         };
         ISagaRepositorio sagas = new DynamoDbSagaRepositorio(Dynamo, TabelasDynamo, Relogio);
         if (decorar is not null) sagas = decorar(sagas);

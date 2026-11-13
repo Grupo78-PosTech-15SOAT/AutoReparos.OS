@@ -75,7 +75,7 @@ public sealed class OrquestradorSaga(
                 if (transicao.Aceita && mensagem.Tipo is TiposMensagem.ExecucaoConcluida or TiposMensagem.ExecucaoFalhou) saga.DefinirExecucaoId(mensagem.ExecucaoId);
             }
 
-            switch (await GravarAsync(saga, new EventoProcessado(mensagem.EventId, mensagem.Tipo), cancellationToken))
+            switch (await GravarAsync(saga, transicao.Reentregavel ? null : new EventoProcessado(mensagem.EventId, mensagem.Tipo), cancellationToken))
             {
                 case ResultadoGravacao.EventoDuplicado:
                     return ResultadoMensagem.Duplicada;

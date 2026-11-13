@@ -247,7 +247,7 @@ public sealed class SagaOS
                 $"Cancelamento recusado: execução já concluída ({Estado}); nenhuma compensação nem estorno é executado.", "saga.cancelamento-recusado");
         // D-33: sem confirmação da reserva não há o que cancelar com segurança; o comando espera (o cliente tenta de novo).
         if (Estado == EstadoSaga.ReservandoInsumos)
-            return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, "saga_em_andamento: reserva de insumos sem confirmação; cancelamento aguarda.");
+            return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, "saga_em_andamento: reserva de insumos sem confirmação; cancelamento aguarda.", reentregavel: true);
         if (Estado is EstadoSaga.Compensando or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou)
             return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento ignorado: Saga já está em {Estado}.");
         Registrar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento solicitado: {motivo ?? "não informado"}.");
@@ -397,13 +397,26 @@ public sealed class SagaOS
     public bool SincronizacaoDevida(DateTimeOffset agora) =>
         SincronizacoesPendentes.Count > 0 && (ProximaSincronizacaoEm is null || ProximaSincronizacaoEm <= agora);
 
-    /// <summary>Comandos saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).</summary>
+    /// <summary>
+    /// Os comandos do fluxo saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).
+    /// Os lembretes ao Cadastros seguem uma fila própria, para que um Cadastros fora do ar nunca atrase uma compensação.
+    /// </summary>
     public ComandoSaga? ProximoComandoDevido(DateTimeOffset agora)
     {
-        if (Comandos.FirstOrDefault(c => c.Pendente) is not { } primeiro || (primeiro.ProximaTentativaEm is not null && primeiro.ProximaTentativaEm > agora))
-            return null;
-        primeiro.NormalizarTipo();
-        return primeiro;
+        foreach (var primeiro in PrimeirosPendentes())
+        {
+            if (primeiro.ProximaTentativaEm is not null && primeiro.ProximaTentativaEm > agora) continue;
+            primeiro.NormalizarTipo();
+            return primeiro;
+        }
+        return null;
+    }
+
+    /// <summary>O primeiro comando pendente do fluxo e, separado, o primeiro lembrete pendente (nessa ordem).</summary>
+    private IEnumerable<ComandoSaga> PrimeirosPendentes()
+    {
+        if (Comandos.FirstOrDefault(c => c.Pendente && c.Tipo != TiposMensagem.SagaLembrete) is { } fluxo) yield return fluxo;
+        if (Comandos.FirstOrDefault(c => c.Pendente && c.Tipo == TiposMensagem.SagaLembrete) is { } lembrete) yield return lembrete;
     }
 
     /// <summary>Menor instante em que há trabalho a fazer (sincronização, primeiro comando pendente ou prazo da compensação); nulo se não há pendência.</summary>
@@ -415,7 +428,7 @@ public sealed class SagaOS
             if (menor is null || quando < menor) menor = quando;
         }
         if (SincronizacoesPendentes.Count > 0) Considerar(ProximaSincronizacaoEm ?? DateTimeOffset.MinValue);
-        if (Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
+        foreach (var primeiro in PrimeirosPendentes()) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
         if (AguardaPrazoCompensacao) Considerar(PrazoCompensacaoEm!.Value);
         if (AguardaPrazoPasso) Considerar(PrazoPassoEm!.Value);
         if (AguardaAlertaInsumos) Considerar(ProximoAlertaInsumosEm!.Value);
@@ -609,10 +622,10 @@ public sealed class SagaOS
         return Transicao.Ok;
     }
 
-    private Transicao Rejeitar(DateTimeOffset agora, string evento, Guid eventId, string motivo, string? alerta = null)
+    private Transicao Rejeitar(DateTimeOffset agora, string evento, Guid eventId, string motivo, string? alerta = null, bool reentregavel = false)
     {
         Registrar(agora, evento, eventId, $"Transição rejeitada: {motivo}");
-        return new Transicao(false, motivo, alerta);
+        return new Transicao(false, motivo, alerta, reentregavel);
     }
 
     private void Registrar(DateTimeOffset agora, string evento, Guid? eventId, string descricao)

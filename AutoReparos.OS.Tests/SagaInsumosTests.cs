@@ -147,6 +147,23 @@ public sealed class SagaInsumosTests(SagaAmbiente ambiente) : SagaTestBase(ambie
     }
 
     [Fact]
+    public async Task CancelamentoAdiadoNaoConsomeOEventId()
+    {
+        var s = await AprovarComInsumosAsync();
+        var eventId = Guid.NewGuid();
+
+        var cedo = await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, eventId, ("motivo", "mudei de ideia"));
+        Assert.Equal(ResultadoMensagem.Rejeitada, cedo.Resultado);
+        await ReservadosAsync(s);
+
+        // A mesma mensagem (mesmo eventId, como na rota) vale depois da confirmação da reserva.
+        var tarde = await ReceberAsync(TiposMensagem.OrdemServicoCancelar, s.OrdemServicoId, null, eventId, ("motivo", "mudei de ideia"));
+
+        Assert.Equal(ResultadoMensagem.Aplicada, tarde.Resultado);
+        Assert.Equal(EstadoSaga.Compensando, (await SagaAsync(s.OrdemServicoId)).Estado);
+    }
+
+    [Fact]
     public async Task CancelarReservaSoDepoisDaConfirmacao()
     {
         var s = await AprovarComInsumosAsync();

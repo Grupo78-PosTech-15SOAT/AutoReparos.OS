@@ -104,7 +104,8 @@ public sealed class ComandoSaga
 public sealed record RegistroSaga(DateTimeOffset Em, string Evento, Guid? EventId, string Descricao);
 
 /// <summary>Resultado de aplicar uma mensagem à Saga. Rejeições são registradas na própria Saga (idempotente).</summary>
-public sealed record Transicao(bool Aceita, string? Motivo = null, string? CodigoAlerta = null)
+/// <remarks><paramref name="Reentregavel"/>: a rejeição é só um adiamento (ex.: cancelamento durante a reserva); o <c>eventId</c> não é consumido e a mesma mensagem pode ser aplicada depois.</remarks>
+public sealed record Transicao(bool Aceita, string? Motivo = null, string? CodigoAlerta = null, bool Reentregavel = false)
 {
     public static readonly Transicao Ok = new(true);
 }

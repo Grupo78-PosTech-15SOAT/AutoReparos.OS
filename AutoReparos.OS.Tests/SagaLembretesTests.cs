@@ -79,4 +79,25 @@ public sealed class SagaLembretesTests(SagaAmbiente ambiente) : SagaTestBase(amb
         Assert.Equal(EstadoSaga.AguardandoInsumos, (await SagaAsync(id)).Estado);
         Assert.Empty(Atual.Envio.TiposEnviados.Intersect(Compensacoes));
     }
+
+    [Fact]
+    public async Task LembreteNaoExpiraOrcamento_CadastrosForaDoArNaoAtrasaACompensacao()
+    {
+        var (id, clienteId, _) = await CriarOSAsync();
+        var correlacao = Guid.NewGuid();
+        var itens = new[] { new { insumoId = Guid.NewGuid(), quantidade = 1 } };
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", Guid.NewGuid()), ("clienteId", clienteId), ("itens", itens));
+        await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
+        await ReceberAsync(TiposMensagem.InsumosReservaFalhou, id, null, null, ("correlacaoId", correlacao), ("motivo", "Saldo insuficiente."), ("itensEmFalta", Array.Empty<object>()));
+        Atual.Envio.Falha = (destino, _) => destino == DestinoComando.Cadastros ? new InvalidOperationException("cadastros fora do ar") : null;
+        Relogio.Avancar(TimeSpan.FromHours(24));
+        await CicloAsync();
+        var preso = Assert.Single((await SagaAsync(id)).Comandos, c => c.Pendente);
+        Assert.Equal("saga.lembrete.v1", preso.Tipo);
+
+        await ReceberAsync(TiposMensagem.OrdemServicoCancelar, id, null, null, ("motivo", "cliente desistiu"));
+
+        // O lembrete segue em backoff, mas a compensação do orçamento sai na hora.
+        Assert.Contains("cobranca.cancelar-orcamento.v1", Atual.Envio.TiposEnviados);
+    }
 }
