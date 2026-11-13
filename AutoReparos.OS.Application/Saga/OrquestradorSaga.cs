@@ -137,6 +137,7 @@ public sealed class OrquestradorSaga(
             else if (saga.SincronizacaoDevida(agora)) await SincronizarAsync(saga, agora, cancellationToken);
             else if (saga.ProximoComandoDevido(agora) is { } comando) await DespacharAsync(saga, comando, agora, cancellationToken);
             else if (saga.AlertaInsumosDevido(agora)) await AlertarInsumosAsync(saga, agora, cancellationToken);
+            else if (saga.LembretePagamentoDevido(agora)) await LembrarPagamentoAsync(saga, agora, cancellationToken);
             else return;
         }
     }
@@ -178,6 +179,13 @@ public sealed class OrquestradorSaga(
             alertador.Alertar("saga.passo-reenviado", $"Sem resposta de {comando} na Saga da OS {saga.OrdemServicoId} até {limite}; passo reenviado ({saga.ReenviosPasso} de {opcoes.MaxReenvios}).", saga.OrdemServicoId);
         else
             alertador.Alertar("saga.passo-sem-resposta", $"Sem resposta de {comando} na Saga da OS {saga.OrdemServicoId} até {limite} depois de {opcoes.MaxReenvios} reenvios; compensando ({SagaOS.MotivoSemResposta}).", saga.OrdemServicoId);
+    }
+
+    /// <summary>Prazo de negócio vencido: persiste o lembrete ao cliente e agenda o próximo; nunca cancela o orçamento.</summary>
+    private async Task LembrarPagamentoAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        saga.RegistrarLembretePagamento(agora);
+        await GravarAsync(saga, null, cancellationToken);
     }
 
     private async Task AlertarInsumosAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)

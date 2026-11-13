@@ -104,8 +104,9 @@ public sealed class SagaInsumosTests(SagaAmbiente ambiente) : SagaTestBase(ambie
         var retentativa = await Atual.Orquestrador.RetentarReservaAsync(s.OrdemServicoId, "admin", "saldo reposto", CancellationToken.None);
         Assert.Equal(ResultadoRetentativa.Aceita, retentativa);
         Assert.Equal(EstadoSaga.ReservandoInsumos, (await SagaAsync(s.OrdemServicoId)).Estado);
-        Assert.Equal(["execucao.reservar-insumos.v1", "execucao.reservar-insumos.v1"], Atual.Envio.TiposEnviados);
-        Assert.NotEqual(Json.Ler(Atual.Envio.Enviados[0].Corpo).GetProperty("eventId").GetGuid(), Json.Ler(Atual.Envio.Enviados[1].Corpo).GetProperty("eventId").GetGuid());
+        // O segundo alerta diário trouxe o lembrete ao Cadastros (C10) entre as duas reservas.
+        Assert.Equal(["execucao.reservar-insumos.v1", "saga.lembrete.v1", "execucao.reservar-insumos.v1"], Atual.Envio.TiposEnviados);
+        Assert.NotEqual(Json.Ler(Atual.Envio.Enviados[0].Corpo).GetProperty("eventId").GetGuid(), Json.Ler(Atual.Envio.Enviados[2].Corpo).GetProperty("eventId").GetGuid());
     }
 
     [Fact]

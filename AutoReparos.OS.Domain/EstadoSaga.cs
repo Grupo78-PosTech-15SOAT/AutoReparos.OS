@@ -41,5 +41,7 @@ public enum StatusPagamento
 public enum DestinoComando
 {
     Execucao,
-    Billing
+    Billing,
+    /// <summary>Lembretes de negócio (<c>saga.lembrete.v1</c>), entregues ao Cadastros para notificar o cliente.</summary>
+    Cadastros
 }

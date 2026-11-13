@@ -18,6 +18,9 @@ public sealed class SagaOS
     /// <summary>Intervalo entre os alertas enquanto a Saga aguarda insumos (D-20).</summary>
     public static readonly TimeSpan IntervaloAlertaInsumos = TimeSpan.FromDays(1);
 
+    /// <summary>Intervalo entre os lembretes ao cliente enquanto a Saga aguarda o pagamento (prazo de negócio: nunca expira nem cancela).</summary>
+    public static readonly TimeSpan IntervaloLembretePagamento = TimeSpan.FromHours(24);
+
     /// <summary>Limite de caracteres do motivo (o Execution rejeita mais que isto); comandos de compensação o respeitam.</summary>
     public const int MotivoMaximo = 2000;
 
@@ -56,6 +59,8 @@ public sealed class SagaOS
     /// <summary>Prazo técnico do passo em andamento (<c>PrazoReserva</c> ou <c>PrazoLiberacao</c>); nulo quando nenhum passo espera.</summary>
     [JsonInclude] public DateTimeOffset? PrazoPassoEm { get; private set; }
     [JsonInclude] public int ReenviosCompensacao { get; private set; }
+    /// <summary>Próximo lembrete de pagamento; só vale em <c>ExecucaoConcluida</c> (aguardando pagamento).</summary>
+    [JsonInclude] public DateTimeOffset? ProximoLembretePagamentoEm { get; private set; }
 
     /// <summary>Versão persistida (0 = ainda não gravada). Controlada pela persistência.</summary>
     [JsonIgnore] public long Versao { get; private set; }
@@ -63,8 +68,9 @@ public sealed class SagaOS
     [JsonIgnore] public bool Terminal => Estado is EstadoSaga.PagamentoCapturado or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou;
     [JsonIgnore] public bool AguardaPrazoCompensacao => Estado == EstadoSaga.Compensando && PrazoCompensacaoEm is not null;
     [JsonIgnore] public bool AguardaAlertaInsumos => Estado == EstadoSaga.AguardandoInsumos && ProximoAlertaInsumosEm is not null;
+    [JsonIgnore] public bool AguardaLembretePagamento => Estado == EstadoSaga.ExecucaoConcluida && ProximoLembretePagamentoEm is not null;
     [JsonIgnore] public bool AguardaPrazoPasso => PrazoPassoEm is not null;
-    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao || AguardaPrazoPasso || AguardaAlertaInsumos;
+    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao || AguardaPrazoPasso || AguardaAlertaInsumos || AguardaLembretePagamento;
 
     [JsonConstructor]
     private SagaOS() { }
@@ -148,6 +154,33 @@ public sealed class SagaOS
     {
         ProximoAlertaInsumosEm = agora + IntervaloAlertaInsumos;
         Registrar(agora, "saga.aguardando-insumos", null, "Alerta diário: a Saga segue aguardando insumos.");
+        EmitirLembrete(agora, "aguardando-insumos");
+    }
+
+    public bool LembretePagamentoDevido(DateTimeOffset agora) => AguardaLembretePagamento && ProximoLembretePagamentoEm <= agora;
+
+    /// <summary>Lembrete de pagamento: só publica <c>saga.lembrete.v1</c> e agenda o próximo; a Saga nunca expira nem cancela por falta de pagamento.</summary>
+    public void RegistrarLembretePagamento(DateTimeOffset agora)
+    {
+        ProximoLembretePagamentoEm = agora + IntervaloLembretePagamento;
+        EmitirLembrete(agora, "aguardando-pagamento");
+    }
+
+    private void EmitirLembrete(DateTimeOffset agora, string motivo)
+    {
+        var id = Guid.NewGuid();
+        var corpo = JsonSerializer.Serialize(new
+        {
+            eventId = id,
+            tipo = TiposMensagem.SagaLembrete,
+            correlacaoId = CorrelacaoId,
+            ordemServicoId = OrdemServicoId,
+            clienteId = ClienteId,
+            motivo,
+            ocorreuEm = Formatar(agora)
+        }, JsonComando);
+        Comandos.Add(new ComandoSaga(id, TiposMensagem.SagaLembrete, DestinoComando.Cadastros, null, corpo, agora));
+        Registrar(agora, "saga.lembrete", id, $"Lembrete {motivo} persistido para o Cadastros.");
     }
 
     /// <summary>Retentar a reserva (pessoa autorizada): só vale em <c>AguardandoInsumos</c>; novo comando com novo <c>eventId</c>.</summary>
@@ -166,6 +199,7 @@ public sealed class SagaOS
             return Rejeitar(agora, TiposMensagem.ExecucaoConcluida, eventId, $"Transição inválida a partir de {Estado}.");
         Estado = EstadoSaga.ExecucaoConcluida;
         Etapa(3).Marcar(SituacaoEtapa.Concluida, agora);
+        ProximoLembretePagamentoEm = agora + IntervaloLembretePagamento;
         SincronizacoesPendentes.Add(StatusOS.Concluida);
         return Aceitar(agora, TiposMensagem.ExecucaoConcluida, eventId, "Execução concluída; aguardando pagamento.");
     }
@@ -385,6 +419,7 @@ public sealed class SagaOS
         if (AguardaPrazoCompensacao) Considerar(PrazoCompensacaoEm!.Value);
         if (AguardaPrazoPasso) Considerar(PrazoPassoEm!.Value);
         if (AguardaAlertaInsumos) Considerar(ProximoAlertaInsumosEm!.Value);
+        if (AguardaLembretePagamento) Considerar(ProximoLembretePagamentoEm!.Value);
         return menor;
     }
 

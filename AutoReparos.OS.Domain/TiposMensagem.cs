@@ -21,6 +21,7 @@ public static class TiposMensagem
     public const string ExecucaoCancelar = "execucao.cancelar.v1";
     public const string ExecucaoReservarInsumos = "execucao.reservar-insumos.v1";
     public const string ExecucaoCancelarReserva = "execucao.cancelar-reserva.v1";
+    public const string SagaLembrete = "saga.lembrete.v1";
     public const string CobrancaCancelarOrcamento = "cobranca.cancelar-orcamento.v1";
     public const string BillingOrcamentoCancelarLegado = "billing.orcamento.cancelar.v1";
     public const string BillingOrcamentoCancelar = CobrancaCancelarOrcamento;
