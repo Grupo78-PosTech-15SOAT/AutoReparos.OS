@@ -47,6 +47,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("CancelarOS", policy => policy.RequireRole("Administrador", "Atendente"));
     options.AddPolicy("AdministrarSagas", policy => policy.RequireRole("Administrador"));
 });
+builder.Services.Configure<OpcoesCadastros>(builder.Configuration.GetSection(OpcoesCadastros.Secao));
+builder.Services.AddHttpClient<ICadastros, CadastrosHttp>(cliente => cliente.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
 builder.Services.AddHostedService<PublicadorSqs>();
 builder.Services.AddSagaOS(builder.Configuration);
@@ -55,7 +57,7 @@ if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
 app.UseAuthorization();
 var ordens = app.MapGroup("/api/v1/ordens-servico").RequireAuthorization("OperarOS");
-ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, CancellationToken ct) =>
+ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, ICadastros cadastros, CancellationToken ct) =>
 {
     var corpo = await CorpoJson.LerObjetoAsync(http, ct);
     if (corpo is null
@@ -63,6 +65,24 @@ ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository,
         || !CorpoJson.TentarLerGuid(corpo.Value, "veiculoId", out var veiculoId) || veiculoId == Guid.Empty
         || !CorpoJson.TentarLerObservacao(corpo.Value, out _, out var observacao))
         return CorpoJson.Invalido();
+    // Cliente e veículo são do Cadastros: o JWT de quem abre a OS é repassado e 404 impede a abertura.
+    // Contas de serviço (ServicoOS) não têm papel de oficina no Cadastros: sem usuário humano, usam a chave interna.
+    var autorizacao = http.HttpContext.User.IsInRole("ServicoOS") ? string.Empty : http.Headers.Authorization.ToString();
+    ResultadoValidacaoCadastro validacao;
+    try
+    {
+        validacao = await cadastros.ValidarAsync(clienteId, veiculoId, string.IsNullOrWhiteSpace(autorizacao) ? null : autorizacao, ct);
+    }
+    catch (CadastrosIndisponivelException)
+    {
+        return Results.Json(new { codigo = "cadastros_indisponivel" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    switch (validacao)
+    {
+        case ResultadoValidacaoCadastro.ClienteInexistente: return Results.NotFound(new { codigo = "cliente_nao_encontrado" });
+        case ResultadoValidacaoCadastro.VeiculoInexistente: return Results.NotFound(new { codigo = "veiculo_nao_encontrado" });
+        case ResultadoValidacaoCadastro.VeiculoDeOutroCliente: return Results.UnprocessableEntity(new { codigo = "veiculo_de_outro_cliente" });
+    }
     var ordem = new OrdemServico(clienteId, veiculoId, observacao, DateTimeOffset.UtcNow);
     await repository.AdicionarAsync(ordem, ct);
     await repository.SalvarAsync(ct);
