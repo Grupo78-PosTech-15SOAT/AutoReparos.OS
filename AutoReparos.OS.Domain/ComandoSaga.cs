@@ -40,6 +40,18 @@ public sealed class ComandoSaga
         CriadoEm = agora;
     }
 
+    /// <summary>Cópia para reenvio: mesmo conteúdo, novo <c>eventId</c> (também no corpo) e contadores zerados.</summary>
+    internal ComandoSaga Reenvio(Guid novoEventId, DateTimeOffset agora)
+    {
+        var corpo = Corpo;
+        if (JsonNode.Parse(Corpo) is JsonObject objeto)
+        {
+            objeto["eventId"] = novoEventId.ToString();
+            corpo = objeto.ToJsonString(JsonNormalizacao);
+        }
+        return new ComandoSaga(novoEventId, Tipo, Destino, EtapaCompensada, corpo, agora);
+    }
+
     internal void MarcarEnviado(DateTimeOffset agora)
     {
         EnviadoEm = agora;

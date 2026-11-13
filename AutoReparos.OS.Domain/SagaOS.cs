@@ -50,6 +50,12 @@ public sealed class SagaOS
     [JsonInclude] public Guid VeiculoId { get; private set; }
     /// <summary>Próximo alerta diário <c>saga.aguardando-insumos</c>; nulo fora de <c>AguardandoInsumos</c>.</summary>
     [JsonInclude] public DateTimeOffset? ProximoAlertaInsumosEm { get; private set; }
+    /// <summary>Início do passo que espera resposta (reserva) ou entrega (liberação); reinicia a cada reenvio.</summary>
+    [JsonInclude] public DateTimeOffset? PassoIniciadoEm { get; private set; }
+    [JsonInclude] public int ReenviosPasso { get; private set; }
+    /// <summary>Prazo técnico do passo em andamento (<c>PrazoReserva</c> ou <c>PrazoLiberacao</c>); nulo quando nenhum passo espera.</summary>
+    [JsonInclude] public DateTimeOffset? PrazoPassoEm { get; private set; }
+    [JsonInclude] public int ReenviosCompensacao { get; private set; }
 
     /// <summary>Versão persistida (0 = ainda não gravada). Controlada pela persistência.</summary>
     [JsonIgnore] public long Versao { get; private set; }
@@ -57,7 +63,8 @@ public sealed class SagaOS
     [JsonIgnore] public bool Terminal => Estado is EstadoSaga.PagamentoCapturado or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou;
     [JsonIgnore] public bool AguardaPrazoCompensacao => Estado == EstadoSaga.Compensando && PrazoCompensacaoEm is not null;
     [JsonIgnore] public bool AguardaAlertaInsumos => Estado == EstadoSaga.AguardandoInsumos && ProximoAlertaInsumosEm is not null;
-    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao || AguardaAlertaInsumos;
+    [JsonIgnore] public bool AguardaPrazoPasso => PrazoPassoEm is not null;
+    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao || AguardaPrazoPasso || AguardaAlertaInsumos;
 
     [JsonConstructor]
     private SagaOS() { }
@@ -271,6 +278,86 @@ public sealed class SagaOS
         return (etapa.Numero, etapa.Compensacao!, prazo);
     }
 
+    /// <summary>
+    /// Reenvia a compensação sem confirmação (idempotente no participante) e reinicia o prazo; vale até <paramref name="maxReenvios"/> vezes
+    /// por compensação. Esgotados, o chamador usa <see cref="ExpirarCompensacao"/>.
+    /// </summary>
+    public bool ReenviarCompensacao(DateTimeOffset agora, int maxReenvios)
+    {
+        if (ReenviosCompensacao >= maxReenvios) return false;
+        var etapa = Etapas.Single(e => e.Situacao == SituacaoEtapa.Compensando);
+        var anterior = Comandos.Last(c => c.EtapaCompensada == etapa.Numero);
+        if (anterior.Pendente) anterior.MarcarDescartado(agora);
+        var novo = anterior.Reenvio(Guid.NewGuid(), agora);
+        Comandos.Add(novo);
+        ReenviosCompensacao++;
+        CompensacaoEmitidaEm = agora;
+        Registrar(agora, "saga.compensacao-reenviada", novo.EventId, $"Compensação da etapa {etapa.Numero} sem confirmação; reenvio {ReenviosCompensacao}.");
+        return true;
+    }
+
+    // ---- Prazo técnico do passo (reserva e liberação) ----
+
+    public const string MotivoSemResposta = "liberacao_sem_resposta";
+
+    /// <summary>
+    /// Arma o prazo do passo que espera: a reserva espera <c>insumos.reservados.v1</c> ou <c>insumos.reserva-falhou.v1</c>; a liberação
+    /// só tem prazo enquanto o comando não foi entregue, porque o contrato não traz confirmação positiva de <c>ordem-servico.liberada.v1</c>.
+    /// </summary>
+    public void ArmarPrazoPasso(TimeSpan prazoReserva, TimeSpan prazoLiberacao) =>
+        PrazoPassoEm = (Estado, PassoIniciadoEm) switch
+        {
+            (EstadoSaga.ReservandoInsumos, { } inicio) => inicio + prazoReserva,
+            (EstadoSaga.ExecucaoLiberada, { } inicio) when LiberacaoNaoEntregue() => inicio + prazoLiberacao,
+            _ => null
+        };
+
+    public bool PassoSemResposta(DateTimeOffset agora) => AguardaPrazoPasso && PrazoPassoEm <= agora;
+
+    /// <summary>
+    /// Prazo vencido: reenvia o comando (novo <c>eventId</c>; a Execução é idempotente por OS) até <paramref name="maxReenvios"/> vezes e,
+    /// esgotados, compensa com o motivo <c>liberacao_sem_resposta</c>. A reserva sem resposta é tratada como possivelmente feita
+    /// (compensação <c>cancelar-reserva</c> forçada); a liberação não entregue é abandonada e a etapa 2 não é compensada.
+    /// </summary>
+    public (string Comando, bool Reenviado, DateTimeOffset Prazo) ExpirarPasso(DateTimeOffset agora, int maxReenvios)
+    {
+        var prazo = PrazoPassoEm!.Value;
+        var reserva = Estado == EstadoSaga.ReservandoInsumos;
+        var tipo = reserva ? TiposMensagem.ExecucaoReservarInsumos : TiposMensagem.OrdemServicoLiberada;
+        PrazoPassoEm = null;
+        if (ReenviosPasso < maxReenvios)
+        {
+            var anterior = Comandos.Last(c => c.Tipo == tipo);
+            if (anterior.Pendente) anterior.MarcarDescartado(agora);
+            var novo = anterior.Reenvio(Guid.NewGuid(), agora);
+            Comandos.Add(novo);
+            ReenviosPasso++;
+            PassoIniciadoEm = agora;
+            Registrar(agora, "saga.passo-reenviado", novo.EventId, $"Sem resposta de {tipo} até {Formatar(prazo)}; reenvio {ReenviosPasso}.");
+            return (tipo, true, prazo);
+        }
+        Registrar(agora, "saga.passo-sem-resposta", null, $"Sem resposta de {tipo} até {Formatar(prazo)} depois de {ReenviosPasso} reenvios; compensando.");
+        if (reserva) Etapa(5).Marcar(SituacaoEtapa.Concluida, agora);
+        else AbandonarLiberacaoNaoEntregue(agora);
+        PassoIniciadoEm = null;
+        IniciarCompensacao(agora, MotivoSemResposta);
+        return (tipo, false, prazo);
+    }
+
+    private bool LiberacaoNaoEntregue() => Comandos.Any(c => c.Tipo == TiposMensagem.OrdemServicoLiberada && c.EnviadoEm is null && c.DescartadoEm is null);
+
+    /// <summary>Liberação que nunca foi entregue: o comando é descartado e a OS não vai a <c>EmExecucao</c>; a etapa 2 volta a pendente (nada a compensar).</summary>
+    private void AbandonarLiberacaoNaoEntregue(DateTimeOffset agora)
+    {
+        foreach (var comando in Comandos.Where(c => c.Pendente && c.Tipo == TiposMensagem.OrdemServicoLiberada)) comando.MarcarDescartado(agora);
+        Etapa(2).Marcar(SituacaoEtapa.Pendente, agora);
+        var indice = SincronizacoesPendentes.IndexOf(StatusOS.EmExecucao);
+        if (indice < 0) return;
+        SincronizacoesPendentes.RemoveAt(indice);
+        if (indice != 0) return;
+        TentativasSincronizacao = 0; ProximaSincronizacaoEm = null; UltimoErroSincronizacao = null;
+    }
+
     // ---- Progressão interna (sincronização da OS e despacho de comandos) ----
 
     public bool SincronizacaoDevida(DateTimeOffset agora) =>
@@ -296,6 +383,7 @@ public sealed class SagaOS
         if (SincronizacoesPendentes.Count > 0) Considerar(ProximaSincronizacaoEm ?? DateTimeOffset.MinValue);
         if (Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
         if (AguardaPrazoCompensacao) Considerar(PrazoCompensacaoEm!.Value);
+        if (AguardaPrazoPasso) Considerar(PrazoPassoEm!.Value);
         if (AguardaAlertaInsumos) Considerar(ProximoAlertaInsumosEm!.Value);
         return menor;
     }
@@ -334,6 +422,8 @@ public sealed class SagaOS
     {
         Estado = EstadoSaga.ReservandoInsumos;
         ProximoAlertaInsumosEm = null;
+        PassoIniciadoEm = agora;
+        ReenviosPasso = 0;
         var id = Guid.NewGuid();
         var corpo = JsonSerializer.Serialize(new
         {
@@ -353,6 +443,8 @@ public sealed class SagaOS
         var clienteId = ClienteId;
         var veiculoId = VeiculoId;
         Estado = EstadoSaga.ExecucaoLiberada;
+        PassoIniciadoEm = agora;
+        ReenviosPasso = 0;
         Etapa(2).Marcar(SituacaoEtapa.Concluida, agora);
         var id = Guid.NewGuid();
         var corpo = JsonSerializer.Serialize(new
@@ -462,6 +554,7 @@ public sealed class SagaOS
         var compensacao = etapa.NormalizarCompensacao();
         etapa.Marcar(SituacaoEtapa.Compensando, agora);
         CompensacaoEmitidaEm = agora;
+        ReenviosCompensacao = 0;
         var id = Guid.NewGuid();
         var porExecucao = etapa.Numero is 2 or 5;
         var corpo = porExecucao

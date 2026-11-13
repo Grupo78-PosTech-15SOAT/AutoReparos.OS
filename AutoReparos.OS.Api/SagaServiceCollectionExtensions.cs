@@ -29,7 +29,13 @@ public static class SagaServiceCollectionExtensions
         services.AddSingleton<IAlertador, AlertadorLog>();
         var prazo = configuration.GetValue<TimeSpan?>("Saga:PrazoCompensacao");
         if (prazo is { } p && p <= TimeSpan.Zero) throw new InvalidOperationException("Saga:PrazoCompensacao deve ser maior que zero.");
-        services.AddSingleton(prazo is { } valor ? new OpcoesSaga { PrazoCompensacao = valor } : new OpcoesSaga());
+        var padraoSaga = new OpcoesSaga();
+        var prazoReserva = configuration.GetValue<TimeSpan?>("Saga:PrazoReserva") ?? padraoSaga.PrazoReserva;
+        var prazoLiberacao = configuration.GetValue<TimeSpan?>("Saga:PrazoLiberacao") ?? padraoSaga.PrazoLiberacao;
+        var maxReenvios = configuration.GetValue<int?>("Saga:MaxReenvios") ?? padraoSaga.MaxReenvios;
+        if (prazoReserva <= TimeSpan.Zero || prazoLiberacao <= TimeSpan.Zero) throw new InvalidOperationException("Saga:PrazoReserva e Saga:PrazoLiberacao devem ser maiores que zero.");
+        if (maxReenvios < 0) throw new InvalidOperationException("Saga:MaxReenvios não pode ser negativo.");
+        services.AddSingleton(new OpcoesSaga { PrazoCompensacao = prazo ?? padraoSaga.PrazoCompensacao, PrazoReserva = prazoReserva, PrazoLiberacao = prazoLiberacao, MaxReenvios = maxReenvios });
         services.AddScoped<CancelamentoOrdemServico>();
         services.AddSingleton<ConsoleSagas>();
         services.AddSingleton<OrquestradorSaga>();
