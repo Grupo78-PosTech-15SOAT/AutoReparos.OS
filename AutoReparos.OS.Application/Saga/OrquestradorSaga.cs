@@ -3,6 +3,8 @@ using AutoReparos.OS.Domain;
 
 namespace AutoReparos.OS.Application.Saga;
 
+public enum ResultadoRetentativa { Aceita, NaoEncontrada, EmAndamento, Indisponivel }
+
 public enum ResultadoMensagem
 {
     Aplicada,
@@ -54,14 +56,14 @@ public sealed class OrquestradorSaga(
                 var jaCancelada = await ordens.ObterStatusAsync(mensagem.OrdemServicoId, cancellationToken) == StatusOS.Cancelada;
                 if (jaCancelada)
                 {
-                    saga = SagaOS.IniciarJaCancelada(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora);
+                    saga = SagaOS.IniciarJaCancelada(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora, mensagem.Itens);
                     transicao = new Transicao(true,
                         $"orcamento.aprovado.v1 recebido para a OS {mensagem.OrdemServicoId} já Cancelada: o orçamento será compensado e a OS não foi reativada.",
                         "saga.orcamento-aprovado-apos-cancelamento");
                 }
                 else
                 {
-                    saga = SagaOS.Iniciar(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora);
+                    saga = SagaOS.Iniciar(mensagem.OrdemServicoId, mensagem.OrcamentoId!.Value, mensagem.CorrelacaoId, mensagem.EventId, agora, mensagem.Itens);
                     transicao = Transicao.Ok;
                 }
             }
@@ -72,9 +74,8 @@ public sealed class OrquestradorSaga(
                     : Aplicar(saga, mensagem, agora);
                 if (transicao.Aceita && mensagem.Tipo is TiposMensagem.ExecucaoConcluida or TiposMensagem.ExecucaoFalhou) saga.DefinirExecucaoId(mensagem.ExecucaoId);
             }
-            saga.ArmarPrazoCompensacao(opcoes.PrazoCompensacao);
 
-            switch (await sagas.GravarAsync(saga, new EventoProcessado(mensagem.EventId, mensagem.Tipo), cancellationToken))
+            switch (await GravarAsync(saga, transicao.Reentregavel ? null : new EventoProcessado(mensagem.EventId, mensagem.Tipo), cancellationToken))
             {
                 case ResultadoGravacao.EventoDuplicado:
                     return ResultadoMensagem.Duplicada;
@@ -114,6 +115,9 @@ public sealed class OrquestradorSaga(
         TiposMensagem.ExecucaoCancelada => saga.AplicarCompensacaoConfirmada(m.Tipo, 2, m.EventId, agora),
         TiposMensagem.OrcamentoCancelamentoRecusado => saga.AplicarCompensacaoRecusada(m.Tipo, 1, m.EventId, m.Motivo, agora),
         TiposMensagem.ExecucaoCancelamentoRecusado => saga.AplicarCompensacaoRecusada(m.Tipo, 2, m.EventId, m.Motivo, agora),
+        TiposMensagem.InsumosReservados => saga.AplicarInsumosReservados(m.EventId, agora),
+        TiposMensagem.InsumosReservaFalhou => saga.AplicarReservaFalhou(m.EventId, m.Motivo, agora),
+        TiposMensagem.InsumosReservaCancelada => saga.AplicarCompensacaoConfirmada(m.Tipo, 5, m.EventId, agora),
         _ => throw new InvalidOperationException($"Tipo sem tratamento: {m.Tipo}.")
     };
 
@@ -129,17 +133,74 @@ public sealed class OrquestradorSaga(
             if (saga is null || !saga.TemTrabalhoPendente) return;
             var agora = tempo.GetUtcNow();
             if (saga.CompensacaoSemResposta(agora)) await ExpirarCompensacaoAsync(saga, agora, cancellationToken);
+            else if (saga.PassoSemResposta(agora)) await ExpirarPassoAsync(saga, agora, cancellationToken);
             else if (saga.SincronizacaoDevida(agora)) await SincronizarAsync(saga, agora, cancellationToken);
             else if (saga.ProximoComandoDevido(agora) is { } comando) await DespacharAsync(saga, comando, agora, cancellationToken);
+            else if (saga.AlertaInsumosDevido(agora)) await AlertarInsumosAsync(saga, agora, cancellationToken);
+            else if (saga.LembretePagamentoDevido(agora)) await LembrarPagamentoAsync(saga, agora, cancellationToken);
             else return;
         }
+    }
+
+    /// <summary>Retentar a reserva de uma Saga que aguarda insumos (D-20): novo comando, 409 <c>saga_em_andamento</c> nos estados pendentes.</summary>
+    public async Task<ResultadoRetentativa> RetentarReservaAsync(Guid ordemServicoId, string autor, string motivo, CancellationToken cancellationToken)
+    {
+        for (var conflitos = 0; conflitos < opcoes.MaxConflitosVersao; conflitos++)
+        {
+            var saga = await sagas.ObterAsync(ordemServicoId, cancellationToken);
+            if (saga is null) return ResultadoRetentativa.NaoEncontrada;
+            if (saga.Estado is EstadoSaga.ReservandoInsumos or EstadoSaga.Compensando) return ResultadoRetentativa.EmAndamento;
+            var agora = tempo.GetUtcNow();
+            if (!saga.Retentar(Guid.NewGuid(), autor, motivo, agora).Aceita) return ResultadoRetentativa.Indisponivel;
+            var gravacao = await GravarAsync(saga, null, cancellationToken);
+            if (gravacao == ResultadoGravacao.ConflitoVersao) continue;
+            try { await ProgredirAsync(ordemServicoId, cancellationToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
+            return ResultadoRetentativa.Aceita;
+        }
+        throw new ConflitoSagaException(ordemServicoId);
+    }
+
+    /// <summary>Grava a Saga com os prazos recalculados (compensação e passo), para que o despachador a retome no momento certo.</summary>
+    private Task<ResultadoGravacao> GravarAsync(SagaOS saga, EventoProcessado? evento, CancellationToken cancellationToken)
+    {
+        saga.ArmarPrazoCompensacao(opcoes.PrazoCompensacao);
+        saga.ArmarPrazoPasso(opcoes.PrazoReserva, opcoes.PrazoLiberacao);
+        return sagas.GravarAsync(saga, evento, cancellationToken);
+    }
+
+    /// <summary>Reserva ou liberação sem resposta no prazo: reenvia e, esgotados os reenvios, compensa (C5, C9).</summary>
+    private async Task ExpirarPassoAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        var (comando, reenviado, prazo) = saga.ExpirarPasso(agora, opcoes.MaxReenvios);
+        if (await GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
+        var limite = prazo.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+        if (reenviado)
+            alertador.Alertar("saga.passo-reenviado", $"Sem resposta de {comando} na Saga da OS {saga.OrdemServicoId} até {limite}; passo reenviado ({saga.ReenviosPasso} de {opcoes.MaxReenvios}).", saga.OrdemServicoId);
+        else
+            alertador.Alertar("saga.passo-sem-resposta", $"Sem resposta de {comando} na Saga da OS {saga.OrdemServicoId} até {limite} depois de {opcoes.MaxReenvios} reenvios; compensando ({SagaOS.MotivoSemResposta}).", saga.OrdemServicoId);
+    }
+
+    /// <summary>Prazo de negócio vencido: persiste o lembrete ao cliente e agenda o próximo; nunca cancela o orçamento.</summary>
+    private async Task LembrarPagamentoAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        saga.RegistrarLembretePagamento(agora);
+        await GravarAsync(saga, null, cancellationToken);
+    }
+
+    private async Task AlertarInsumosAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
+    {
+        saga.RegistrarAlertaInsumos(agora);
+        if (await GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
+        alertador.Alertar("saga.aguardando-insumos", $"Saga da OS {saga.OrdemServicoId} segue aguardando insumos; retentar ou cancelar.", saga.OrdemServicoId);
     }
 
     /// <summary>Compensação sem confirmação no prazo: a Saga vai a <c>CompensacaoFalhou</c> e o alerta pede intervenção.</summary>
     private async Task ExpirarCompensacaoAsync(SagaOS saga, DateTimeOffset agora, CancellationToken cancellationToken)
     {
+        if (saga.ReenviarCompensacao(agora, opcoes.MaxReenvios)) { await GravarAsync(saga, null, cancellationToken); return; }
         var (etapa, compensacao, prazo) = saga.ExpirarCompensacao(agora);
-        if (await sagas.GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
+        if (await GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
         alertador.Alertar("saga.compensacao-sem-resposta",
             $"Compensação da etapa {etapa} ({compensacao}) sem confirmação até {prazo.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)}; " +
             $"Saga da OS {saga.OrdemServicoId} em CompensacaoFalhou, intervenção necessária.", saga.OrdemServicoId);
@@ -159,7 +220,7 @@ public sealed class OrquestradorSaga(
             // Recuperação para frente: nunca estorna nem desfaz pagamento; retenta com backoff (teto fixo) e alerta a cada falha.
             var atraso = opcoes.Atraso(saga.TentativasSincronizacao + 1, opcoes.AtrasoSincronizacaoMaximo);
             saga.FalharSincronizacao(agora + atraso, ex.Message, agora);
-            if (await sagas.GravarAsync(saga, null, cancellationToken) == ResultadoGravacao.Gravada)
+            if (await GravarAsync(saga, null, cancellationToken) == ResultadoGravacao.Gravada)
                 alertador.Alertar("saga.sincronizacao-os-falhou",
                     $"Falha ao sincronizar a OS {saga.OrdemServicoId} para {status} (Saga em {saga.Estado}, tentativa {saga.TentativasSincronizacao}): {ex.Message}. " +
                     $"Recuperação para frente: nova tentativa em {atraso.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)}s; nenhum estorno ou desfazimento de pagamento será executado.",
@@ -170,7 +231,7 @@ public sealed class OrquestradorSaga(
         saga.ConcluirSincronizacao(agora);
         if (status == StatusOS.OrcamentoAprovado) saga.AvancarParaExecucaoLiberada(resultado.ClienteId, resultado.VeiculoId, agora);
         // Em conflito, o próximo passo recarrega e repete a sincronização (idempotente).
-        await sagas.GravarAsync(saga, null, cancellationToken);
+        await GravarAsync(saga, null, cancellationToken);
     }
 
     private async Task DespacharAsync(SagaOS saga, ComandoSaga comando, DateTimeOffset agora, CancellationToken cancellationToken)
@@ -182,7 +243,7 @@ public sealed class OrquestradorSaga(
             {
                 await envio.EnviarAsync(comando.Destino, comando.Corpo, cancellationToken);
                 saga.RegistrarEnvio(comando.EventId, agora);
-                await sagas.GravarAsync(saga, null, cancellationToken);
+                await GravarAsync(saga, null, cancellationToken);
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -193,7 +254,7 @@ public sealed class OrquestradorSaga(
             if (tentativa < opcoes.MaxTentativas)
             {
                 saga.RegistrarFalhaEnvio(comando.EventId, agora + opcoes.Atraso(tentativa), erro, agora);
-                await sagas.GravarAsync(saga, null, cancellationToken);
+                await GravarAsync(saga, null, cancellationToken);
                 return;
             }
             saga.RegistrarFalhaEnvio(comando.EventId, agora, erro, agora);
@@ -212,13 +273,13 @@ public sealed class OrquestradorSaga(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             saga.RegistrarFalhaDlq(comando.EventId, agora + opcoes.Atraso(opcoes.MaxTentativas, opcoes.AtrasoSincronizacaoMaximo), ex.Message, agora);
-            if (await sagas.GravarAsync(saga, null, cancellationToken) == ResultadoGravacao.Gravada)
+            if (await GravarAsync(saga, null, cancellationToken) == ResultadoGravacao.Gravada)
                 alertador.Alertar("saga.dlq-indisponivel", $"{motivo}. Falha também ao enviar à DLQ: {ex.Message}. O comando permanece pendente; intervenção necessária.", saga.OrdemServicoId, comando.EventId);
             return;
         }
 
         var compensacaoFalhou = saga.RegistrarComandoNaDlq(comando.EventId, erro, agora);
-        if (await sagas.GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
+        if (await GravarAsync(saga, null, cancellationToken) != ResultadoGravacao.Gravada) return;
         alertador.Alertar("saga.comando-esgotado", $"{motivo}. Encaminhado à DLQ; intervenção necessária.", saga.OrdemServicoId, comando.EventId);
         if (compensacaoFalhou)
             alertador.Alertar("saga.compensacao-falhou", $"Compensação não entregue para a OS {saga.OrdemServicoId} ({comando.Tipo}); Saga em CompensacaoFalhou, intervenção necessária.", saga.OrdemServicoId, comando.EventId);

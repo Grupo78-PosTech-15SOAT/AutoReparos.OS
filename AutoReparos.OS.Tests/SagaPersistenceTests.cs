@@ -17,7 +17,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         Atual.Envio.AoEnviar = async (_, _) => itemNoEnvio = await ItemBrutoAsync(id);
 
         // O clienteId da mensagem é de propósito diferente: o comando usa o da OS no Postgres.
-        var (corpo, eventId) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var (corpo, eventId) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         var resultado = await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
 
         Assert.Equal(new ResultadoProcessamento(DesfechoMensagem.Processada, ResultadoMensagem.Aplicada, 1), resultado);
@@ -66,7 +66,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         var capturas = new List<(string Tipo, string Corpo, Dictionary<string, AttributeValue> Item)>();
         Atual.Envio.AoEnviar = async (_, corpo) => capturas.Add((Json.Tipo(corpo), corpo, await ItemBrutoAsync(id)));
 
-        var (aprovado, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var (aprovado, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         await Atual.Processador.ProcessarAsync(aprovado, CancellationToken.None);
         await ReceberAsync(TiposMensagem.OrdemServicoCancelar, id, null, null, ("motivo", "cliente desistiu"));
         await ReceberAsync(TiposMensagem.ExecucaoCancelada, id, null, null, ("execucaoId", Guid.NewGuid()));
@@ -120,7 +120,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
     {
         var (id, _, _) = await CriarOSAsync();
         var orcamentoId = Guid.NewGuid();
-        var (corpo, eventId) = Mensagem(TiposMensagem.OrcamentoAprovado, id, null, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var (corpo, eventId) = Mensagem(TiposMensagem.OrcamentoAprovado, id, null, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
 
@@ -248,7 +248,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
     public async Task SagaDuplicateEvent_RedeliveredBudgetApprovalDoesNotCreateASecondSagaOrCommand()
     {
         var (id, _, _) = await CriarOSAsync();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
         var repetida = await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None);
@@ -284,7 +284,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
     public async Task SagaDuplicateEvent_EightConcurrentConsumersOfTheSameBudgetApprovalCreateOneSagaAndPublishOneCommand()
     {
         var (id, _, _) = await CriarOSAsync();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         var consumidores = Enumerable.Range(0, 8).Select(_ => NovosComponentes()).ToList();
 
         var resultados = await Task.WhenAll(consumidores.Select(c => Task.Run(() => c.Processador.ProcessarAsync(corpo, CancellationToken.None))));
@@ -334,7 +334,7 @@ public sealed class SagaPersistenceTests(SagaAmbiente ambiente) : SagaTestBase(a
         var s = await IniciarSagaAsync();
         var antes = await SagaAsync(s.OrdemServicoId);
 
-        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, s.OrdemServicoId, null, null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, s.OrdemServicoId, null, null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         Assert.Equal(ResultadoMensagem.Rejeitada, resultado.Resultado);
         var depois = await SagaAsync(s.OrdemServicoId);

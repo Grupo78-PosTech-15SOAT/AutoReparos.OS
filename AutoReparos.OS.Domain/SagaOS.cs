@@ -10,8 +10,17 @@ namespace AutoReparos.OS.Domain;
 /// acumulam, no próprio objeto, os comandos a publicar e as sincronizações da OS pendentes; a persistência grava tudo
 /// de uma vez (escrita condicional por versão), garantindo persistir antes de publicar.
 /// </summary>
+/// <summary>Item da reserva: vem do <c>orcamento.aprovado.v1</c> e segue no comando <c>execucao.reservar-insumos.v1</c> (D-32).</summary>
+public sealed record ItemReservaSaga(Guid InsumoId, int Quantidade);
+
 public sealed class SagaOS
 {
+    /// <summary>Intervalo entre os alertas enquanto a Saga aguarda insumos (D-20).</summary>
+    public static readonly TimeSpan IntervaloAlertaInsumos = TimeSpan.FromDays(1);
+
+    /// <summary>Intervalo entre os lembretes ao cliente enquanto a Saga aguarda o pagamento (prazo de negócio: nunca expira nem cancela).</summary>
+    public static readonly TimeSpan IntervaloLembretePagamento = TimeSpan.FromHours(24);
+
     /// <summary>Limite de caracteres do motivo (o Execution rejeita mais que isto); comandos de compensação o respeitam.</summary>
     public const int MotivoMaximo = 2000;
 
@@ -38,18 +47,35 @@ public sealed class SagaOS
     [JsonInclude] public DateTimeOffset? ProximaSincronizacaoEm { get; private set; }
     [JsonInclude] public string? UltimoErroSincronizacao { get; private set; }
     [JsonInclude] public List<RegistroSaga> Registros { get; private set; } = [];
+    /// <summary>Insumos do orçamento aprovado; vazio quando o orçamento só tem serviços (nada a reservar).</summary>
+    [JsonInclude] public List<ItemReservaSaga> Itens { get; private set; } = [];
+    [JsonInclude] public Guid ClienteId { get; private set; }
+    [JsonInclude] public Guid VeiculoId { get; private set; }
+    /// <summary>Próximo alerta diário <c>saga.aguardando-insumos</c>; nulo fora de <c>AguardandoInsumos</c>.</summary>
+    [JsonInclude] public DateTimeOffset? ProximoAlertaInsumosEm { get; private set; }
+    /// <summary>Início do passo que espera resposta (reserva) ou entrega (liberação); reinicia a cada reenvio.</summary>
+    [JsonInclude] public DateTimeOffset? PassoIniciadoEm { get; private set; }
+    [JsonInclude] public int ReenviosPasso { get; private set; }
+    /// <summary>Prazo técnico do passo em andamento (<c>PrazoReserva</c> ou <c>PrazoLiberacao</c>); nulo quando nenhum passo espera.</summary>
+    [JsonInclude] public DateTimeOffset? PrazoPassoEm { get; private set; }
+    [JsonInclude] public int ReenviosCompensacao { get; private set; }
+    /// <summary>Próximo lembrete de pagamento; só vale em <c>ExecucaoConcluida</c> (aguardando pagamento).</summary>
+    [JsonInclude] public DateTimeOffset? ProximoLembretePagamentoEm { get; private set; }
 
     /// <summary>Versão persistida (0 = ainda não gravada). Controlada pela persistência.</summary>
     [JsonIgnore] public long Versao { get; private set; }
 
     [JsonIgnore] public bool Terminal => Estado is EstadoSaga.PagamentoCapturado or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou;
     [JsonIgnore] public bool AguardaPrazoCompensacao => Estado == EstadoSaga.Compensando && PrazoCompensacaoEm is not null;
-    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao;
+    [JsonIgnore] public bool AguardaAlertaInsumos => Estado == EstadoSaga.AguardandoInsumos && ProximoAlertaInsumosEm is not null;
+    [JsonIgnore] public bool AguardaLembretePagamento => Estado == EstadoSaga.ExecucaoConcluida && ProximoLembretePagamentoEm is not null;
+    [JsonIgnore] public bool AguardaPrazoPasso => PrazoPassoEm is not null;
+    [JsonIgnore] public bool TemTrabalhoPendente => SincronizacoesPendentes.Count > 0 || Comandos.Any(c => c.Pendente) || AguardaPrazoCompensacao || AguardaPrazoPasso || AguardaAlertaInsumos || AguardaLembretePagamento;
 
     [JsonConstructor]
     private SagaOS() { }
 
-    public static SagaOS Iniciar(Guid ordemServicoId, Guid orcamentoId, Guid? correlacaoId, Guid eventId, DateTimeOffset agora)
+    public static SagaOS Iniciar(Guid ordemServicoId, Guid orcamentoId, Guid? correlacaoId, Guid eventId, DateTimeOffset agora, IReadOnlyList<ItemReservaSaga>? itens = null)
     {
         var saga = new SagaOS
         {
@@ -57,6 +83,7 @@ public sealed class SagaOS
             OrcamentoId = orcamentoId,
             CorrelacaoId = correlacaoId ?? Guid.NewGuid(),
             Estado = EstadoSaga.OrcamentoAprovado,
+            Itens = [.. itens ?? []],
             CriadoEm = agora,
             AtualizadoEm = agora,
             Etapas =
@@ -67,6 +94,8 @@ public sealed class SagaOS
                 new EtapaSaga(4, "Pagamento capturado", null)
             ]
         };
+        // A etapa da reserva só existe quando o orçamento tem insumos: sem insumos a Saga mantém as quatro etapas de antes.
+        if (saga.Itens.Count > 0) saga.Etapas.Add(new EtapaSaga(5, "Insumos reservados", TiposMensagem.ExecucaoCancelarReserva));
         saga.Etapa(1).Marcar(SituacaoEtapa.Concluida, agora);
         saga.SincronizacoesPendentes.Add(StatusOS.OrcamentoAprovado);
         saga.Registrar(agora, TiposMensagem.OrcamentoAprovado, eventId, "Saga criada; orçamento aprovado.");
@@ -78,9 +107,9 @@ public sealed class SagaOS
     /// nasce equivalente a um <c>ordem-servico.cancelar.v1</c> imediato. A OS não é sincronizada para <c>OrcamentoAprovado</c>
     /// (não é reativada) e a etapa 1 é compensada de imediato com <c>billing.orcamento.cancelar.v1</c>.
     /// </summary>
-    public static SagaOS IniciarJaCancelada(Guid ordemServicoId, Guid orcamentoId, Guid? correlacaoId, Guid eventId, DateTimeOffset agora)
+    public static SagaOS IniciarJaCancelada(Guid ordemServicoId, Guid orcamentoId, Guid? correlacaoId, Guid eventId, DateTimeOffset agora, IReadOnlyList<ItemReservaSaga>? itens = null)
     {
-        var saga = Iniciar(ordemServicoId, orcamentoId, correlacaoId, eventId, agora);
+        var saga = Iniciar(ordemServicoId, orcamentoId, correlacaoId, eventId, agora, itens);
         saga.SincronizacoesPendentes.Clear();
         const string motivo = "orçamento aprovado após o cancelamento da OS";
         saga.Registrar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento aplicado na criação da Saga: {motivo}.");
@@ -97,12 +126,80 @@ public sealed class SagaOS
     public Transicao AplicarOrcamentoAprovadoRepetido(Guid eventId, DateTimeOffset agora) =>
         Rejeitar(agora, TiposMensagem.OrcamentoAprovado, eventId, "Saga já existe para a OS.");
 
+    /// <summary><c>insumos.reservados.v1</c>: a reserva existe, então a etapa 5 passa a ter o que compensar e a execução é liberada.</summary>
+    public Transicao AplicarInsumosReservados(Guid eventId, DateTimeOffset agora)
+    {
+        if (Estado != EstadoSaga.ReservandoInsumos)
+            return Rejeitar(agora, TiposMensagem.InsumosReservados, eventId, $"Transição inválida a partir de {Estado}.");
+        Etapa(5).Marcar(SituacaoEtapa.Concluida, agora);
+        Registrar(agora, TiposMensagem.InsumosReservados, eventId, "Insumos reservados.");
+        LiberarExecucao(agora);
+        return Transicao.Ok;
+    }
+
+    /// <summary><c>insumos.reserva-falhou.v1</c> (D-20): nada foi reservado; a Saga espera saldo sem compensar e alerta já e depois a cada dia.</summary>
+    public Transicao AplicarReservaFalhou(Guid eventId, string? motivo, DateTimeOffset agora)
+    {
+        if (Estado != EstadoSaga.ReservandoInsumos)
+            return Rejeitar(agora, TiposMensagem.InsumosReservaFalhou, eventId, $"Transição inválida a partir de {Estado}.");
+        Estado = EstadoSaga.AguardandoInsumos;
+        ProximoAlertaInsumosEm = agora + IntervaloAlertaInsumos;
+        Registrar(agora, TiposMensagem.InsumosReservaFalhou, eventId, $"Sem saldo de insumos; aguardando. Motivo: {motivo ?? "não informado"}.");
+        return new Transicao(true, $"Saga da OS {OrdemServicoId} aguarda insumos: {motivo ?? "sem saldo"}.", "saga.aguardando-insumos");
+    }
+
+    public bool AlertaInsumosDevido(DateTimeOffset agora) => AguardaAlertaInsumos && ProximoAlertaInsumosEm <= agora;
+
+    public void RegistrarAlertaInsumos(DateTimeOffset agora)
+    {
+        ProximoAlertaInsumosEm = agora + IntervaloAlertaInsumos;
+        Registrar(agora, "saga.aguardando-insumos", null, "Alerta diário: a Saga segue aguardando insumos.");
+        EmitirLembrete(agora, "aguardando-insumos");
+    }
+
+    public bool LembretePagamentoDevido(DateTimeOffset agora) => AguardaLembretePagamento && ProximoLembretePagamentoEm <= agora;
+
+    /// <summary>Lembrete de pagamento: só publica <c>saga.lembrete.v1</c> e agenda o próximo; a Saga nunca expira nem cancela por falta de pagamento.</summary>
+    public void RegistrarLembretePagamento(DateTimeOffset agora)
+    {
+        ProximoLembretePagamentoEm = agora + IntervaloLembretePagamento;
+        EmitirLembrete(agora, "aguardando-pagamento");
+    }
+
+    private void EmitirLembrete(DateTimeOffset agora, string motivo)
+    {
+        var id = Guid.NewGuid();
+        var corpo = JsonSerializer.Serialize(new
+        {
+            eventId = id,
+            tipo = TiposMensagem.SagaLembrete,
+            correlacaoId = CorrelacaoId,
+            ordemServicoId = OrdemServicoId,
+            clienteId = ClienteId,
+            motivo,
+            ocorreuEm = Formatar(agora)
+        }, JsonComando);
+        Comandos.Add(new ComandoSaga(id, TiposMensagem.SagaLembrete, DestinoComando.Cadastros, null, corpo, agora));
+        Registrar(agora, "saga.lembrete", id, $"Lembrete {motivo} persistido para o Cadastros.");
+    }
+
+    /// <summary>Retentar a reserva (pessoa autorizada): só vale em <c>AguardandoInsumos</c>; novo comando com novo <c>eventId</c>.</summary>
+    public Transicao Retentar(Guid eventId, string autor, string motivo, DateTimeOffset agora)
+    {
+        if (Estado != EstadoSaga.AguardandoInsumos)
+            return Rejeitar(agora, "saga.retentada", eventId, $"Retentativa recusada: a Saga está em {Estado}.");
+        Registrar(agora, "saga.retentada", eventId, $"Retentativa por {autor}: {motivo}.");
+        IniciarReserva(agora);
+        return Transicao.Ok;
+    }
+
     public Transicao AplicarExecucaoConcluida(Guid eventId, DateTimeOffset agora)
     {
         if (Estado is not (EstadoSaga.ExecucaoLiberada or EstadoSaga.IntervencaoRequerida))
             return Rejeitar(agora, TiposMensagem.ExecucaoConcluida, eventId, $"Transição inválida a partir de {Estado}.");
         Estado = EstadoSaga.ExecucaoConcluida;
         Etapa(3).Marcar(SituacaoEtapa.Concluida, agora);
+        ProximoLembretePagamentoEm = agora + IntervaloLembretePagamento;
         SincronizacoesPendentes.Add(StatusOS.Concluida);
         return Aceitar(agora, TiposMensagem.ExecucaoConcluida, eventId, "Execução concluída; aguardando pagamento.");
     }
@@ -148,6 +245,9 @@ public sealed class SagaOS
         if (Estado is EstadoSaga.ExecucaoConcluida or EstadoSaga.PagamentoCapturado)
             return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId,
                 $"Cancelamento recusado: execução já concluída ({Estado}); nenhuma compensação nem estorno é executado.", "saga.cancelamento-recusado");
+        // D-33: sem confirmação da reserva não há o que cancelar com segurança; o comando espera (o cliente tenta de novo).
+        if (Estado == EstadoSaga.ReservandoInsumos)
+            return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, "saga_em_andamento: reserva de insumos sem confirmação; cancelamento aguarda.", reentregavel: true);
         if (Estado is EstadoSaga.Compensando or EstadoSaga.Compensada or EstadoSaga.CompensacaoFalhou)
             return Rejeitar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento ignorado: Saga já está em {Estado}.");
         Registrar(agora, TiposMensagem.OrdemServicoCancelar, eventId, $"Cancelamento solicitado: {motivo ?? "não informado"}.");
@@ -212,18 +312,111 @@ public sealed class SagaOS
         return (etapa.Numero, etapa.Compensacao!, prazo);
     }
 
+    /// <summary>
+    /// Reenvia a compensação sem confirmação (idempotente no participante) e reinicia o prazo; vale até <paramref name="maxReenvios"/> vezes
+    /// por compensação. Esgotados, o chamador usa <see cref="ExpirarCompensacao"/>.
+    /// </summary>
+    public bool ReenviarCompensacao(DateTimeOffset agora, int maxReenvios)
+    {
+        if (ReenviosCompensacao >= maxReenvios) return false;
+        var etapa = Etapas.Single(e => e.Situacao == SituacaoEtapa.Compensando);
+        var anterior = Comandos.Last(c => c.EtapaCompensada == etapa.Numero);
+        if (anterior.Pendente) anterior.MarcarDescartado(agora);
+        var novo = anterior.Reenvio(Guid.NewGuid(), agora);
+        Comandos.Add(novo);
+        ReenviosCompensacao++;
+        CompensacaoEmitidaEm = agora;
+        Registrar(agora, "saga.compensacao-reenviada", novo.EventId, $"Compensação da etapa {etapa.Numero} sem confirmação; reenvio {ReenviosCompensacao}.");
+        return true;
+    }
+
+    // ---- Prazo técnico do passo (reserva e liberação) ----
+
+    public const string MotivoSemResposta = "liberacao_sem_resposta";
+
+    /// <summary>
+    /// Arma o prazo do passo que espera: a reserva espera <c>insumos.reservados.v1</c> ou <c>insumos.reserva-falhou.v1</c>; a liberação
+    /// só tem prazo enquanto o comando não foi entregue, porque o contrato não traz confirmação positiva de <c>ordem-servico.liberada.v1</c>.
+    /// </summary>
+    public void ArmarPrazoPasso(TimeSpan prazoReserva, TimeSpan prazoLiberacao) =>
+        PrazoPassoEm = (Estado, PassoIniciadoEm) switch
+        {
+            (EstadoSaga.ReservandoInsumos, { } inicio) => inicio + prazoReserva,
+            (EstadoSaga.ExecucaoLiberada, { } inicio) when LiberacaoNaoEntregue() => inicio + prazoLiberacao,
+            _ => null
+        };
+
+    public bool PassoSemResposta(DateTimeOffset agora) => AguardaPrazoPasso && PrazoPassoEm <= agora;
+
+    /// <summary>
+    /// Prazo vencido: reenvia o comando (novo <c>eventId</c>; a Execução é idempotente por OS) até <paramref name="maxReenvios"/> vezes e,
+    /// esgotados, compensa com o motivo <c>liberacao_sem_resposta</c>. A reserva sem resposta é tratada como possivelmente feita
+    /// (compensação <c>cancelar-reserva</c> forçada); a liberação não entregue é abandonada e a etapa 2 não é compensada.
+    /// </summary>
+    public (string Comando, bool Reenviado, DateTimeOffset Prazo) ExpirarPasso(DateTimeOffset agora, int maxReenvios)
+    {
+        var prazo = PrazoPassoEm!.Value;
+        var reserva = Estado == EstadoSaga.ReservandoInsumos;
+        var tipo = reserva ? TiposMensagem.ExecucaoReservarInsumos : TiposMensagem.OrdemServicoLiberada;
+        PrazoPassoEm = null;
+        if (ReenviosPasso < maxReenvios)
+        {
+            var anterior = Comandos.Last(c => c.Tipo == tipo);
+            if (anterior.Pendente) anterior.MarcarDescartado(agora);
+            var novo = anterior.Reenvio(Guid.NewGuid(), agora);
+            Comandos.Add(novo);
+            ReenviosPasso++;
+            PassoIniciadoEm = agora;
+            Registrar(agora, "saga.passo-reenviado", novo.EventId, $"Sem resposta de {tipo} até {Formatar(prazo)}; reenvio {ReenviosPasso}.");
+            return (tipo, true, prazo);
+        }
+        Registrar(agora, "saga.passo-sem-resposta", null, $"Sem resposta de {tipo} até {Formatar(prazo)} depois de {ReenviosPasso} reenvios; compensando.");
+        if (reserva) Etapa(5).Marcar(SituacaoEtapa.Concluida, agora);
+        else AbandonarLiberacaoNaoEntregue(agora);
+        PassoIniciadoEm = null;
+        IniciarCompensacao(agora, MotivoSemResposta);
+        return (tipo, false, prazo);
+    }
+
+    private bool LiberacaoNaoEntregue() => Comandos.Any(c => c.Tipo == TiposMensagem.OrdemServicoLiberada && c.EnviadoEm is null && c.DescartadoEm is null);
+
+    /// <summary>Liberação que nunca foi entregue: o comando é descartado e a OS não vai a <c>EmExecucao</c>; a etapa 2 volta a pendente (nada a compensar).</summary>
+    private void AbandonarLiberacaoNaoEntregue(DateTimeOffset agora)
+    {
+        foreach (var comando in Comandos.Where(c => c.Pendente && c.Tipo == TiposMensagem.OrdemServicoLiberada)) comando.MarcarDescartado(agora);
+        Etapa(2).Marcar(SituacaoEtapa.Pendente, agora);
+        var indice = SincronizacoesPendentes.IndexOf(StatusOS.EmExecucao);
+        if (indice < 0) return;
+        SincronizacoesPendentes.RemoveAt(indice);
+        if (indice != 0) return;
+        TentativasSincronizacao = 0; ProximaSincronizacaoEm = null; UltimoErroSincronizacao = null;
+    }
+
     // ---- Progressão interna (sincronização da OS e despacho de comandos) ----
 
     public bool SincronizacaoDevida(DateTimeOffset agora) =>
         SincronizacoesPendentes.Count > 0 && (ProximaSincronizacaoEm is null || ProximaSincronizacaoEm <= agora);
 
-    /// <summary>Comandos saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).</summary>
+    /// <summary>
+    /// Os comandos do fluxo saem em ordem de criação: só o primeiro pendente pode ser devido (nenhum ultrapassa outro em backoff).
+    /// Os lembretes ao Cadastros seguem uma fila própria, para que um Cadastros fora do ar nunca atrase uma compensação.
+    /// </summary>
     public ComandoSaga? ProximoComandoDevido(DateTimeOffset agora)
     {
-        if (Comandos.FirstOrDefault(c => c.Pendente) is not { } primeiro || (primeiro.ProximaTentativaEm is not null && primeiro.ProximaTentativaEm > agora))
-            return null;
-        primeiro.NormalizarTipo();
-        return primeiro;
+        foreach (var primeiro in PrimeirosPendentes())
+        {
+            if (primeiro.ProximaTentativaEm is not null && primeiro.ProximaTentativaEm > agora) continue;
+            primeiro.NormalizarTipo();
+            return primeiro;
+        }
+        return null;
+    }
+
+    /// <summary>O primeiro comando pendente do fluxo e, separado, o primeiro lembrete pendente (nessa ordem).</summary>
+    private IEnumerable<ComandoSaga> PrimeirosPendentes()
+    {
+        if (Comandos.FirstOrDefault(c => c.Pendente && c.Tipo != TiposMensagem.SagaLembrete) is { } fluxo) yield return fluxo;
+        if (Comandos.FirstOrDefault(c => c.Pendente && c.Tipo == TiposMensagem.SagaLembrete) is { } lembrete) yield return lembrete;
     }
 
     /// <summary>Menor instante em que há trabalho a fazer (sincronização, primeiro comando pendente ou prazo da compensação); nulo se não há pendência.</summary>
@@ -235,8 +428,11 @@ public sealed class SagaOS
             if (menor is null || quando < menor) menor = quando;
         }
         if (SincronizacoesPendentes.Count > 0) Considerar(ProximaSincronizacaoEm ?? DateTimeOffset.MinValue);
-        if (Comandos.FirstOrDefault(c => c.Pendente) is { } primeiro) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
+        foreach (var primeiro in PrimeirosPendentes()) Considerar(primeiro.ProximaTentativaEm ?? DateTimeOffset.MinValue);
         if (AguardaPrazoCompensacao) Considerar(PrazoCompensacaoEm!.Value);
+        if (AguardaPrazoPasso) Considerar(PrazoPassoEm!.Value);
+        if (AguardaAlertaInsumos) Considerar(ProximoAlertaInsumosEm!.Value);
+        if (AguardaLembretePagamento) Considerar(ProximoLembretePagamentoEm!.Value);
         return menor;
     }
 
@@ -262,7 +458,41 @@ public sealed class SagaOS
     public bool AvancarParaExecucaoLiberada(Guid clienteId, Guid veiculoId, DateTimeOffset agora)
     {
         if (Estado != EstadoSaga.OrcamentoAprovado || SincronizacoesPendentes.Count > 0) return false;
+        ClienteId = clienteId;
+        VeiculoId = veiculoId;
+        // Com insumos, a execução só é liberada depois de `insumos.reservados.v1`; sem insumos não há o que reservar.
+        if (Itens.Count > 0) IniciarReserva(agora);
+        else LiberarExecucao(agora);
+        return true;
+    }
+
+    private void IniciarReserva(DateTimeOffset agora)
+    {
+        Estado = EstadoSaga.ReservandoInsumos;
+        ProximoAlertaInsumosEm = null;
+        PassoIniciadoEm = agora;
+        ReenviosPasso = 0;
+        var id = Guid.NewGuid();
+        var corpo = JsonSerializer.Serialize(new
+        {
+            eventId = id,
+            tipo = TiposMensagem.ExecucaoReservarInsumos,
+            correlacaoId = CorrelacaoId,
+            ordemServicoId = OrdemServicoId,
+            ocorreuEm = Formatar(agora),
+            itens = Itens.Select(i => new { insumoId = i.InsumoId, quantidade = i.Quantidade })
+        }, JsonComando);
+        Comandos.Add(new ComandoSaga(id, TiposMensagem.ExecucaoReservarInsumos, DestinoComando.Execucao, null, corpo, agora));
+        Registrar(agora, "saga.avancou", id, "Reservando insumos; comando execucao.reservar-insumos.v1 persistido.");
+    }
+
+    private void LiberarExecucao(DateTimeOffset agora)
+    {
+        var clienteId = ClienteId;
+        var veiculoId = VeiculoId;
         Estado = EstadoSaga.ExecucaoLiberada;
+        PassoIniciadoEm = agora;
+        ReenviosPasso = 0;
         Etapa(2).Marcar(SituacaoEtapa.Concluida, agora);
         var id = Guid.NewGuid();
         var corpo = JsonSerializer.Serialize(new
@@ -279,7 +509,6 @@ public sealed class SagaOS
         Comandos.Add(new ComandoSaga(id, TiposMensagem.OrdemServicoLiberada, DestinoComando.Execucao, null, corpo, agora));
         SincronizacoesPendentes.Add(StatusOS.EmExecucao);
         Registrar(agora, "saga.avancou", null, "Execução liberada; comando ordem-servico.liberada.v1 persistido.");
-        return true;
     }
 
     public void RegistrarEnvio(Guid eventIdComando, DateTimeOffset agora)
@@ -356,6 +585,7 @@ public sealed class SagaOS
     {
         motivo = Limitar(motivo);
         Estado = EstadoSaga.Compensando;
+        ProximoAlertaInsumosEm = null;
         MotivoCompensacao = motivo;
         if (!EmitirProximaCompensacao(agora, motivo))
         {
@@ -367,13 +597,14 @@ public sealed class SagaOS
     /// <summary>Em ordem inversa: a etapa concluída de maior número com compensação declarada.</summary>
     private bool EmitirProximaCompensacao(DateTimeOffset agora, string motivo)
     {
-        var etapa = Etapas.OrderByDescending(e => e.Numero).FirstOrDefault(e => e.Situacao == SituacaoEtapa.Concluida && e.Compensacao is not null);
+        var etapa = Etapas.OrderByDescending(e => OrdemCompensacao(e.Numero)).FirstOrDefault(e => e.Situacao == SituacaoEtapa.Concluida && e.Compensacao is not null);
         if (etapa is null) return false;
         var compensacao = etapa.NormalizarCompensacao();
         etapa.Marcar(SituacaoEtapa.Compensando, agora);
         CompensacaoEmitidaEm = agora;
+        ReenviosCompensacao = 0;
         var id = Guid.NewGuid();
-        var porExecucao = etapa.Numero == 2;
+        var porExecucao = etapa.Numero is 2 or 5;
         var corpo = porExecucao
             ? JsonSerializer.Serialize(new { eventId = id, tipo = compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), motivo }, JsonComando)
             : JsonSerializer.Serialize(new { eventId = id, tipo = compensacao, correlacaoId = CorrelacaoId, ordemServicoId = OrdemServicoId, ocorreuEm = Formatar(agora), orcamentoId = OrcamentoId, motivo }, JsonComando);
@@ -382,16 +613,19 @@ public sealed class SagaOS
         return true;
     }
 
+    /// <summary>A reserva (etapa 5) acontece entre o orçamento (1) e a liberação (2); a compensação sai na ordem inversa: 2, 5, 1.</summary>
+    private static double OrdemCompensacao(int numero) => numero == 5 ? 1.5 : numero;
+
     private Transicao Aceitar(DateTimeOffset agora, string evento, Guid eventId, string descricao)
     {
         Registrar(agora, evento, eventId, descricao);
         return Transicao.Ok;
     }
 
-    private Transicao Rejeitar(DateTimeOffset agora, string evento, Guid eventId, string motivo, string? alerta = null)
+    private Transicao Rejeitar(DateTimeOffset agora, string evento, Guid eventId, string motivo, string? alerta = null, bool reentregavel = false)
     {
         Registrar(agora, evento, eventId, $"Transição rejeitada: {motivo}");
-        return new Transicao(false, motivo, alerta);
+        return new Transicao(false, motivo, alerta, reentregavel);
     }
 
     private void Registrar(DateTimeOffset agora, string evento, Guid? eventId, string descricao)

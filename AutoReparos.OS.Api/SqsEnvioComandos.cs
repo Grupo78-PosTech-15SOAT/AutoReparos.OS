@@ -3,12 +3,17 @@ using Amazon.SQS.Model;
 using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Domain;
 
-/// <summary>Publica comandos da Saga nas filas do Execution e do Billing e envia mensagens esgotadas à DLQ da Saga.</summary>
+/// <summary>Publica comandos da Saga nas filas do Execution, do Billing e do Cadastros e envia mensagens esgotadas à DLQ da Saga.</summary>
 public sealed class SqsEnvioComandos(IAmazonSQS sqs, IConfiguration configuration) : IEnvioComandos
 {
     public Task EnviarAsync(DestinoComando destino, string corpo, CancellationToken cancellationToken)
     {
-        var chave = destino == DestinoComando.Execucao ? "Sqs:ExecucaoQueueUrl" : "Sqs:BillingQueueUrl";
+        var chave = destino switch
+        {
+            DestinoComando.Execucao => "Sqs:ExecucaoQueueUrl",
+            DestinoComando.Cadastros => "Sqs:CadastrosQueueUrl",
+            _ => "Sqs:BillingQueueUrl"
+        };
         return sqs.SendMessageAsync(new SendMessageRequest { QueueUrl = Exigir(chave), MessageBody = corpo }, cancellationToken);
     }
 

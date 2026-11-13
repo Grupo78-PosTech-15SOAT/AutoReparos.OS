@@ -7,6 +7,8 @@ public enum ResultadoCancelamento
     /// <summary>Cancelamento aceito (ou já aceito antes): repetir não tem novo efeito.</summary>
     Aceito,
     NaoEncontrada,
+    /// <summary>Reserva de insumos ou compensação em andamento: 409 <c>saga_em_andamento</c> (D-33).</summary>
+    EmAndamento,
     /// <summary>A execução já concluiu ou o pagamento já foi capturado.</summary>
     Indisponivel
 }
@@ -38,8 +40,14 @@ public sealed class CancelamentoOrdemServico(ISagaRepositorio sagas, Orquestrado
                 return new RespostaCancelamento(ResultadoCancelamento.Aceito, ordemServicoId, null, StatusOS.Cancelada);
         }
 
+        // Trava de estado: durante a reserva ou outra compensação o cancelamento novo espera (a repetição do mesmo pedido segue idempotente).
+        var eventId = MensagemSaga.EventIdCancelamento(ordemServicoId);
+        if (await sagas.ObterAsync(ordemServicoId, cancellationToken) is { Estado: EstadoSaga.ReservandoInsumos or EstadoSaga.Compensando } emAndamento
+            && (emAndamento.Estado == EstadoSaga.ReservandoInsumos || !await sagas.EventoProcessadoAsync(eventId, cancellationToken)))
+            return new RespostaCancelamento(ResultadoCancelamento.EmAndamento, ordemServicoId, emAndamento.CorrelacaoId, emAndamento.Estado.ToString());
+
         var mensagem = new MensagemSaga(
-            MensagemSaga.EventIdCancelamento(ordemServicoId), TiposMensagem.OrdemServicoCancelar, ordemServicoId, null, tempo.GetUtcNow(),
+            eventId, TiposMensagem.OrdemServicoCancelar, ordemServicoId, null, tempo.GetUtcNow(),
             null, null, null, null, null, motivo);
         await orquestrador.ProcessarAsync(mensagem, cancellationToken);
 

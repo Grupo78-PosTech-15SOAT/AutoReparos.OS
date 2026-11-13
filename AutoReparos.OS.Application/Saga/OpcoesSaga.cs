@@ -12,6 +12,12 @@ public sealed class OpcoesSaga
     public double FatorJitter { get; init; } = 0.5;
     /// <summary>Prazo para a confirmação de cada compensação; vencido, a Saga vai a <c>CompensacaoFalhou</c> com alerta (<c>Saga:PrazoCompensacao</c>).</summary>
     public TimeSpan PrazoCompensacao { get; init; } = TimeSpan.FromMinutes(15);
+    /// <summary>Prazo para a Execução responder à reserva (<c>Saga:PrazoReserva</c>).</summary>
+    public TimeSpan PrazoReserva { get; init; } = TimeSpan.FromMinutes(2);
+    /// <summary>Prazo para entregar a liberação da execução (<c>Saga:PrazoLiberacao</c>).</summary>
+    public TimeSpan PrazoLiberacao { get; init; } = TimeSpan.FromMinutes(2);
+    /// <summary>Reenvios de um passo (reserva, liberação ou compensação) antes de compensar ou falhar (<c>Saga:MaxReenvios</c>).</summary>
+    public int MaxReenvios { get; init; } = 3;
     public int MaxConflitosVersao { get; init; } = 10;
     public Func<double> Aleatorio { get; init; } = () => Random.Shared.NextDouble();
     public Func<TimeSpan, CancellationToken, Task> Aguardar { get; init; } = (atraso, ct) => Task.Delay(atraso, ct);
