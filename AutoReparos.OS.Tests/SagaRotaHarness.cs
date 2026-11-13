@@ -44,6 +44,7 @@ public abstract class SagaRotaBase(SagaAmbiente ambiente) : IAsyncLifetime
         Fabrica = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddDbContext<OrdemServicoDbContext>(o => o.UseNpgsql(ambiente.PostgresConnection));
+            services.AddSingleton<ICadastros, CadastrosAceitaTudo>();
             services.AddScoped<IOrdemServicoRepository>(sp => new RepositorioOSComFalha(sp.GetRequiredService<OrdemServicoDbContext>(), Controle));
             services.AddAuthentication(o => { o.DefaultAuthenticateScheme = "Test"; o.DefaultChallengeScheme = "Test"; o.DefaultForbidScheme = "Test"; })
                 .AddScheme<AuthenticationSchemeOptions, TestAuth>("Test", _ => { });

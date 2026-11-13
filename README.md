@@ -1,6 +1,8 @@
 # AutoReparos.OS
 
-Serviço de ordens de serviço da Fase 4. Configure `ConnectionStrings__OrdemServico` com a conexão do banco próprio, `Authentication__Authority` e `Authentication__Audience` com os dados do emissor JWT, `AWS_REGION`, `Sqs__QueueUrl` e `Sqs__DeadLetterQueueUrl` antes de executar.
+Serviço de ordens de serviço da Fase 4. Configure `ConnectionStrings__OrdemServico` com a conexão do banco próprio, `Authentication__Authority` e `Authentication__Audience` com os dados do emissor JWT, `AWS_REGION`, `Sqs__QueueUrl` e `Sqs__DeadLetterQueueUrl` antes de executar. Configure também `Cadastros__BaseUrl` (URL interna do Cadastros) e `Cadastros__ChaveInterna` (segredo de `X-Chave-Interna`, de um Secret do K8s).
+
+`POST /api/v1/ordens-servico` consulta `GET /api/v1/clientes/{id}` e `GET /api/v1/veiculos/{id}` no Cadastros, repassando o JWT de quem abre a OS (ou a chave interna, quando não há usuário). Cliente ou veículo inexistente responde 404 (`cliente_nao_encontrado`, `veiculo_nao_encontrado`) e a OS não é aberta; veículo de outro cliente responde 422 (`veiculo_de_outro_cliente`); Cadastros fora do ar, ou recusando a chamada, responde 503 (`cadastros_indisponivel`).
 
 O serviço exige os papéis `Administrador`, `Atendente`, `Mecanico` ou `ServicoOS`; a rota de cancelamento exige `Administrador` ou `Atendente`. O emissor deve atribuir `ServicoOS` somente às identidades de serviço autorizadas.
 
