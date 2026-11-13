@@ -51,8 +51,11 @@ public sealed class SagaDlqRotaTests(SagaAmbiente ambiente) : SagaRotaBase(ambie
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Sqs:SagaDeadLetterQueueUrl"] = Dlq, ["Sqs:SagaQueueUrl"] = FilaSaga, ["Sqs:ExecucaoQueueUrl"] = FilaExecucao,
-                ["Sqs:BillingQueueUrl"] = FilaBilling, ["Sqs:CadastrosQueueUrl"] = FilaCadastros
+                ["Sqs:SagaDeadLetterQueueUrl"] = Dlq,
+                ["Sqs:SagaQueueUrl"] = FilaSaga,
+                ["Sqs:ExecucaoQueueUrl"] = FilaExecucao,
+                ["Sqs:BillingQueueUrl"] = FilaBilling,
+                ["Sqs:CadastrosQueueUrl"] = FilaCadastros
             }));
             builder.ConfigureServices(services => services.AddSingleton<IAmazonSQS>(sqs));
         });
