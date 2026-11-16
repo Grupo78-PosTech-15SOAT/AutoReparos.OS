@@ -29,6 +29,9 @@ public sealed class PassosSaga(ContextoSaga saga)
     [When("o atendente cancela a ordem de serviço")]
     public Task QuandoCancelamento() => saga.ReceberAsync(TiposMensagem.OrdemServicoCancelar, ("motivo", "sem previsão de estoque"));
 
+    [When("o Execução confirma o cancelamento da reserva dos insumos")]
+    public Task QuandoReservaCancelada() => saga.ReceberReservaCanceladaAsync();
+
     [When("a Cobrança confirma o cancelamento do orçamento")]
     public Task QuandoOrcamentoCancelado() => saga.ReceberOrcamentoCanceladoAsync();
 

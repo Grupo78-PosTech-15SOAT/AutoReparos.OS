@@ -39,6 +39,8 @@ public sealed class ContextoSaga(SagaAmbiente ambiente) : SagaTestBase(ambiente)
     public Task ReceberPagamentoAsync(string status) =>
         ReceberAsync(TiposMensagem.PagamentoResultado, ("pagamentoId", Guid.NewGuid()), ("status", status), ("referencia", "pix-bdd"));
 
+    public Task ReceberReservaCanceladaAsync() => ReceberAsync(TiposMensagem.InsumosReservaCancelada, ("correlacaoId", Saga!.CorrelacaoId));
+
     public Task ReceberOrcamentoCanceladoAsync() => ReceberAsync(TiposMensagem.OrcamentoCancelado, ("orcamentoId", Saga!.OrcamentoId));
 
     public async Task<EstadoSaga> EstadoAsync() => (await SagaAsync(OrdemServicoId)).Estado;

@@ -29,6 +29,7 @@ Funcionalidade: Compensações da Saga do OS
     E o Execução confirma a reserva dos insumos
     Quando o Execução recusa a liberação da ordem de serviço
     Então a Saga está no estado "Compensando"
-    Quando a Cobrança confirma o cancelamento do orçamento
+    Quando o Execução confirma o cancelamento da reserva dos insumos
+    E a Cobrança confirma o cancelamento do orçamento
     Então a Saga está no estado "Compensada"
     E a ordem de serviço está com o status "Cancelada"

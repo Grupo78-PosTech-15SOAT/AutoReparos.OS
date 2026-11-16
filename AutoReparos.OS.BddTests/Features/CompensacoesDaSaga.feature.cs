@@ -276,12 +276,15 @@ namespace AutoReparos.OS.BddTests.Features
     await testRunner.ThenAsync("a Saga está no estado \"Compensando\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
 #line 32
-    await testRunner.WhenAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+    await testRunner.WhenAsync("o Execução confirma o cancelamento da reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
 #line 33
-    await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+    await testRunner.AndAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
 #line 34
+    await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+#line hidden
+#line 35
     await testRunner.AndAsync("a ordem de serviço está com o status \"Cancelada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
             }
