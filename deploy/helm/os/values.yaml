@@ -1,0 +1,60 @@
+# Valores do chart do OS. O job deploy informa image.*, aws.conta, serviceAccount.roleArn e autenticacao.emissor.
+
+image:
+  repository: ""  # URL do ECR autoreparos-os (output ecr_url do Terraform)
+  tag: ""         # SHA do commit
+  pullPolicy: IfNotPresent
+
+aws:
+  conta: ""
+  regiao: us-east-1
+
+serviceAccount:
+  roleArn: ""  # role IRSA autoreparos-os-irsa (output irsa_role_arn do Terraform)
+
+database:
+  variavel: ConnectionStrings__OrdemServico  # chave do Secret os-database
+
+autenticacao:
+  emissor: ""    # URL pública do API Gateway (/autoreparos/production/apigateway/endpoint), emissor dos tokens do Cadastros
+  audiencia: "autoreparos"  # aud emitido pelo Cadastros (D-57); vazia não define Authentication__Audience
+
+telemetria:
+  nomeServico: autoreparos-os
+  otlpEndpoint: http://autoreparos-otel-collector.autoreparos.svc.cluster.local:4317
+
+# Nomes das filas (a fila pertence ao consumidor e é criada pelo Terraform dele).
+filas:
+  saga: autoreparos-os-saga
+  sagaDlq: autoreparos-os-saga-dlq
+  execucao: autoreparos-execucao-liberadas
+  cobranca: autoreparos-cobranca-comandos
+  cadastros: autoreparos-cadastros-notificacoes
+
+dynamodb:
+  tabelaSaga: autoreparos-os-saga
+  tabelaEventos: autoreparos-os-saga-eventos
+
+cadastros:
+  baseUrl: http://cadastros.cadastros.svc.cluster.local:8080
+
+ingress:
+  ordem: 10
+  prefixos:
+    - /api/v1/ordens-servico
+    - /api/v1/admin/sagas
+
+hpa:
+  cpu: 80
+
+migracao:
+  prazoSegundos: 600
+
+# Dois nós t3.medium dividem os quatro serviços, o Web e a observabilidade.
+resources:
+  requests:
+    cpu: 50m
+    memory: 160Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi

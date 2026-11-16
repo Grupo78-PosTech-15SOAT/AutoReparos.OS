@@ -1,0 +1,6 @@
+apiVersion: v2
+name: os
+description: Chart do serviço de ordens de serviço (OS) do AutoReparos, implantado pelo job deploy do próprio repositório
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

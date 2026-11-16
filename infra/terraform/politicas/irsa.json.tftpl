@@ -1,0 +1,55 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ConsumirFilasProprias",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:SendMessage"
+      ],
+      "Resource": [
+        "arn:aws:sqs:${regiao}:${conta}:autoreparos-os-saga",
+        "arn:aws:sqs:${regiao}:${conta}:autoreparos-os-saga-dlq"
+      ]
+    },
+    {
+      "Sid": "EnviarComandosDaSaga",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl"
+      ],
+      "Resource": [
+        "arn:aws:sqs:${regiao}:${conta}:autoreparos-cobranca-comandos",
+        "arn:aws:sqs:${regiao}:${conta}:autoreparos-execucao-liberadas",
+        "arn:aws:sqs:${regiao}:${conta}:autoreparos-cadastros-notificacoes"
+      ]
+    },
+    {
+      "Sid": "EstadoDaSaga",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:${regiao}:${conta}:table/autoreparos-os-saga",
+        "arn:aws:dynamodb:${regiao}:${conta}:table/autoreparos-os-saga/index/*",
+        "arn:aws:dynamodb:${regiao}:${conta}:table/autoreparos-os-saga-eventos"
+      ]
+    }
+  ]
+}
