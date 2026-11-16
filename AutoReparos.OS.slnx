@@ -4,6 +4,7 @@
   <Project Path="AutoReparos.OS.Api.Tests/AutoReparos.OS.Api.Tests.csproj" />
   <Project Path="AutoReparos.OS.Api/AutoReparos.OS.Api.csproj" />
   <Project Path="AutoReparos.OS.Application/AutoReparos.OS.Application.csproj" />
+  <Project Path="AutoReparos.OS.BddTests/AutoReparos.OS.BddTests.csproj" />
   <Project Path="AutoReparos.OS.Domain/AutoReparos.OS.Domain.csproj" />
   <Project Path="AutoReparos.OS.Infrastructure/AutoReparos.OS.Infrastructure.csproj" />
   <Project Path="AutoReparos.OS.IntegrationTests/AutoReparos.OS.IntegrationTests.csproj" />
