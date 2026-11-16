@@ -3,6 +3,8 @@ using Amazon.SQS.Model;
 using AutoReparos.OS.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
+namespace AutoReparos.OS.Api;
+
 public sealed class PublicadorSqs(IServiceScopeFactory scopes, IAmazonSQS sqs, IConfiguration configuration, ILogger<PublicadorSqs> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

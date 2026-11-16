@@ -4,6 +4,8 @@ using Amazon.SQS.Model;
 using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Domain;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>
 /// Reprocessa a DLQ da Saga (<c>Sqs:SagaDeadLetterQueueUrl</c>): devolve cada mensagem à fila de origem, escolhida pelo <c>tipo</c>
 /// (eventos de entrada voltam à fila da Saga; comandos esgotados voltam à fila do Execution, do Billing ou do Cadastros), e só a apaga

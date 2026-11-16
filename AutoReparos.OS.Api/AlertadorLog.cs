@@ -1,5 +1,7 @@
 using AutoReparos.OS.Application.Saga;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>Alerta acionável: log de erro estruturado com o código; o ambiente de observabilidade alerta pelo código.</summary>
 public sealed class AlertadorLog(ILogger<AlertadorLog> logger) : IAlertador
 {

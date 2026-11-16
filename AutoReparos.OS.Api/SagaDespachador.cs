@@ -1,6 +1,8 @@
 using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Infrastructure.Saga;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>
 /// Retoma e publica o trabalho pendente das Sagas (comandos persistidos e sincronizações da OS), inclusive ao iniciar
 /// o processo. Cria as tabelas se <c>DynamoDb:CriarTabelas</c> for verdadeiro (ambiente local e de teste).
