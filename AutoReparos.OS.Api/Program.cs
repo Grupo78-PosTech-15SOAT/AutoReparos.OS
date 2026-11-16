@@ -35,6 +35,7 @@ builder.Logging.AddOpenTelemetry(logging =>
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<OrdemServicoDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("OrdemServico")));
 builder.Services.AddScoped<IOrdemServicoRepository>(services => services.GetRequiredService<OrdemServicoDbContext>());
+builder.Services.AddHealthChecks().AddDbContextCheck<OrdemServicoDbContext>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.Authority = builder.Configuration["Authentication:Authority"];
@@ -56,6 +57,8 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
 app.UseAuthorization();
+// Probe do kubelet e health check do ALB: anônima mesmo se uma política de fallback passar a exigir autenticação.
+app.MapHealthChecks("/health").AllowAnonymous();
 var ordens = app.MapGroup("/api/v1/ordens-servico").RequireAuthorization("OperarOS");
 ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, ICadastros cadastros, CancellationToken ct) =>
 {
