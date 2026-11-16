@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="AWSSDK.SQS" Version="4.0.100.24" />
+    <!-- IRSA no EKS: o AWSSDK.Core carrega o cliente do STS por reflexão para trocar o token do pod pela credencial. -->
+    <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.101.10" />
     <ProjectReference Include="..\AutoReparos.OS.Infrastructure\AutoReparos.OS.Infrastructure.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.6" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
