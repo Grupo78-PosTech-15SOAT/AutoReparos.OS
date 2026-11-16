@@ -19,6 +19,8 @@ public sealed class OpcoesSaga
     /// <summary>Reenvios de um passo (reserva, liberação ou compensação) antes de compensar ou falhar (<c>Saga:MaxReenvios</c>).</summary>
     public int MaxReenvios { get; init; } = 3;
     public int MaxConflitosVersao { get; init; } = 10;
+    /// <summary>Saga não terminal sem atualização há pelo menos este tempo conta como parada no gauge <c>sagas_paradas</c> (<c>Saga:LimiarParada</c>).</summary>
+    public TimeSpan LimiarParada { get; init; } = TimeSpan.FromMinutes(30);
     public Func<double> Aleatorio { get; init; } = () => Random.Shared.NextDouble();
     public Func<TimeSpan, CancellationToken, Task> Aguardar { get; init; } = (atraso, ct) => Task.Delay(atraso, ct);
 

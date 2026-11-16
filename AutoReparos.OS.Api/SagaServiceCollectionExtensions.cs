@@ -37,7 +37,9 @@ public static class SagaServiceCollectionExtensions
         var maxReenvios = configuration.GetValue<int?>("Saga:MaxReenvios") ?? padraoSaga.MaxReenvios;
         if (prazoReserva <= TimeSpan.Zero || prazoLiberacao <= TimeSpan.Zero) throw new InvalidOperationException("Saga:PrazoReserva e Saga:PrazoLiberacao devem ser maiores que zero.");
         if (maxReenvios < 0) throw new InvalidOperationException("Saga:MaxReenvios não pode ser negativo.");
-        services.AddSingleton(new OpcoesSaga { PrazoCompensacao = prazo ?? padraoSaga.PrazoCompensacao, PrazoReserva = prazoReserva, PrazoLiberacao = prazoLiberacao, MaxReenvios = maxReenvios });
+        var limiarParada = configuration.GetValue<TimeSpan?>("Saga:LimiarParada") ?? padraoSaga.LimiarParada;
+        if (limiarParada <= TimeSpan.Zero) throw new InvalidOperationException("Saga:LimiarParada deve ser maior que zero.");
+        services.AddSingleton(new OpcoesSaga { PrazoCompensacao = prazo ?? padraoSaga.PrazoCompensacao, PrazoReserva = prazoReserva, PrazoLiberacao = prazoLiberacao, MaxReenvios = maxReenvios, LimiarParada = limiarParada });
         services.AddScoped<CancelamentoOrdemServico>();
         services.AddSingleton<ConsoleSagas>();
         services.AddSingleton<ReprocessadorDlq>();
@@ -46,6 +48,9 @@ public static class SagaServiceCollectionExtensions
         services.AddSingleton<DespachadorSaga>();
         services.AddHostedService<SagaConsumidor>();
         services.AddHostedService<SagaDespachador>();
+        services.AddSingleton<IProfundidadeDlqSaga, SqsProfundidadeDlqSaga>();
+        services.AddSingleton<ColetorMetricasSaga>();
+        services.AddHostedService<MonitorMetricasSaga>();
         return services;
     }
 }
