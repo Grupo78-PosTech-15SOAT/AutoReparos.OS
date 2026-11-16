@@ -40,7 +40,7 @@ public sealed class SagaConsumidorTests(SagaAmbiente ambiente) : SagaTestBase(am
         var chamadas = new List<string>();
         var sqs = SqsFalso(chamadas);
         var (id, _, _) = await CriarOSAsync();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         Atual.Envio.AoEnviar = (_, _) => { chamadas.Add("envio"); return Task.CompletedTask; };
 
         await NovoConsumidor().ProcessarMensagemAsync(sqs.Object, Fila, Atual.Processador, MensagemSqs(corpo), CancellationToken.None);
@@ -79,7 +79,7 @@ public sealed class SagaConsumidorTests(SagaAmbiente ambiente) : SagaTestBase(am
         sqs.Setup(s => s.ChangeMessageVisibilityAsync(It.IsAny<ChangeMessageVisibilityRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new AmazonSQSException("recibo expirado"));
         var (id, _, _) = await CriarOSAsync();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, null, null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, null, null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         await NovoConsumidor().ProcessarMensagemAsync(sqs.Object, Fila, Atual.Processador, MensagemSqs(corpo), CancellationToken.None);
 

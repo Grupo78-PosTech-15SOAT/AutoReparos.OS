@@ -35,6 +35,7 @@ builder.Logging.AddOpenTelemetry(logging =>
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<OrdemServicoDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("OrdemServico")));
 builder.Services.AddScoped<IOrdemServicoRepository>(services => services.GetRequiredService<OrdemServicoDbContext>());
+builder.Services.AddHealthChecks().AddDbContextCheck<OrdemServicoDbContext>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.Authority = builder.Configuration["Authentication:Authority"];
@@ -45,16 +46,22 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("OperarOS", policy => policy.RequireRole("Administrador", "Atendente", "Mecanico", "ServicoOS"));
     options.AddPolicy("CancelarOS", policy => policy.RequireRole("Administrador", "Atendente"));
+    options.AddPolicy("AdministrarSagas", policy => policy.RequireRole("Administrador"));
 });
+builder.Services.Configure<OpcoesCadastros>(builder.Configuration.GetSection(OpcoesCadastros.Secao));
+builder.Services.AddHttpClient<ICadastros, CadastrosHttp>(cliente => cliente.Timeout = TimeSpan.FromSeconds(5));
 builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
 builder.Services.AddHostedService<PublicadorSqs>();
 builder.Services.AddSagaOS(builder.Configuration);
 var app = builder.Build();
+if (app.Configuration.GetValue<bool>(MigracaoBancoDados.MigrarESair)) return await MigracaoBancoDados.MigrarESairAsync<OrdemServicoDbContext>(app);
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
 app.UseAuthorization();
+// Probe do kubelet e health check do ALB: anônima mesmo se uma política de fallback passar a exigir autenticação.
+app.MapHealthChecks("/health").AllowAnonymous();
 var ordens = app.MapGroup("/api/v1/ordens-servico").RequireAuthorization("OperarOS");
-ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, CancellationToken ct) =>
+ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository, ICadastros cadastros, CancellationToken ct) =>
 {
     var corpo = await CorpoJson.LerObjetoAsync(http, ct);
     if (corpo is null
@@ -62,6 +69,24 @@ ordens.MapPost("/", async (HttpRequest http, IOrdemServicoRepository repository,
         || !CorpoJson.TentarLerGuid(corpo.Value, "veiculoId", out var veiculoId) || veiculoId == Guid.Empty
         || !CorpoJson.TentarLerObservacao(corpo.Value, out _, out var observacao))
         return CorpoJson.Invalido();
+    // Cliente e veículo são do Cadastros: o JWT de quem abre a OS é repassado e 404 impede a abertura.
+    // Contas de serviço (ServicoOS) não têm papel de oficina no Cadastros: sem usuário humano, usam a chave interna.
+    var autorizacao = http.HttpContext.User.IsInRole("ServicoOS") ? string.Empty : http.Headers.Authorization.ToString();
+    ResultadoValidacaoCadastro validacao;
+    try
+    {
+        validacao = await cadastros.ValidarAsync(clienteId, veiculoId, string.IsNullOrWhiteSpace(autorizacao) ? null : autorizacao, ct);
+    }
+    catch (CadastrosIndisponivelException)
+    {
+        return Results.Json(new { codigo = "cadastros_indisponivel" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    switch (validacao)
+    {
+        case ResultadoValidacaoCadastro.ClienteInexistente: return Results.NotFound(new { codigo = "cliente_nao_encontrado" });
+        case ResultadoValidacaoCadastro.VeiculoInexistente: return Results.NotFound(new { codigo = "veiculo_nao_encontrado" });
+        case ResultadoValidacaoCadastro.VeiculoDeOutroCliente: return Results.UnprocessableEntity(new { codigo = "veiculo_de_outro_cliente" });
+    }
     var ordem = new OrdemServico(clienteId, veiculoId, observacao, DateTimeOffset.UtcNow);
     await repository.AdicionarAsync(ordem, ct);
     await repository.SalvarAsync(ct);
@@ -102,8 +127,54 @@ ordens.MapPost("/{id:guid}/cancelamento", async (Guid id, HttpRequest http, Canc
     {
         ResultadoCancelamento.NaoEncontrada => Results.NotFound(),
         ResultadoCancelamento.Indisponivel => Results.Conflict(new { codigo = "cancelamento_indisponivel" }),
+        ResultadoCancelamento.EmAndamento => Results.Conflict(new { codigo = "saga_em_andamento" }),
         _ => Results.Accepted(value: new { ordemServicoId = resposta.OrdemServicoId, correlacaoId = resposta.CorrelacaoId, estado = resposta.Estado })
     };
 }).RequireAuthorization("CancelarOS");
+var admin = app.MapGroup("/api/v1/admin/sagas").RequireAuthorization("AdministrarSagas");
+admin.MapGet("/", async (string? estado, int? paradaHaMinutos, ConsoleSagas console, CancellationToken ct) =>
+{
+    if (estado is not null && (!Enum.TryParse<EstadoSaga>(estado, ignoreCase: false, out var estadoLido) || !Enum.IsDefined(estadoLido) || int.TryParse(estado, out _)) || paradaHaMinutos is < 0) return CorpoJson.Invalido();
+    var lista = await console.ListarAsync(estado is null ? null : Enum.Parse<EstadoSaga>(estado), paradaHaMinutos, ct);
+    return Results.Ok(lista.Select(s => new { s.OrdemServicoId, estado = s.Estado.ToString(), s.AtualizadoEm, s.OrcamentoId }));
+});
+admin.MapGet("/{ordemServicoId:guid}", async (Guid ordemServicoId, ConsoleSagas console, CancellationToken ct) =>
+{
+    var saga = await console.ObterAsync(ordemServicoId, ct);
+    return saga is null ? Results.NotFound() : Results.Ok(new
+    {
+        saga.OrdemServicoId,
+        saga.CorrelacaoId,
+        saga.OrcamentoId,
+        estado = saga.Estado.ToString(),
+        saga.MotivoCompensacao,
+        saga.AtualizadoEm,
+        saga.Itens,
+        etapas = saga.Etapas.Select(e => new { e.Numero, e.Nome, situacao = e.Situacao.ToString(), e.ResultadoCompensacao, e.ErroCompensacao }),
+        comandos = saga.Comandos.Select(c => new { c.Tipo, destino = c.Destino.ToString(), c.EnviadoEm, c.Tentativas, c.UltimoErro }),
+        saga.Registros
+    });
+});
+admin.MapPost("/{ordemServicoId:guid}/retentar", async (Guid ordemServicoId, HttpContext http, ConsoleSagas console, CancellationToken ct) =>
+{
+    var corpo = await CorpoJson.LerObjetoAsync(http.Request, ct);
+    if (corpo is null || !CorpoJson.TentarLerMotivo(corpo.Value, out var motivo)) return CorpoJson.Invalido();
+    var autor = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? http.User.Identity?.Name ?? "desconhecido";
+    return await console.RetentarAsync(ordemServicoId, autor, motivo, ct) switch
+    {
+        ResultadoRetentativa.NaoEncontrada => Results.NotFound(),
+        ResultadoRetentativa.EmAndamento => Results.Conflict(new { codigo = "saga_em_andamento" }),
+        ResultadoRetentativa.Indisponivel => Results.Conflict(new { codigo = "retentativa_indisponivel" }),
+        _ => Results.Accepted(value: new { ordemServicoId, passo = "reserva-de-insumos" })
+    };
+});
+app.MapPost("/api/v1/admin/dlq/reprocessar", async (HttpContext http, ReprocessadorDlq reprocessador, CancellationToken ct) =>
+{
+    var corpo = await CorpoJson.LerObjetoAsync(http.Request, ct);
+    if (corpo is null || !CorpoJson.TentarLerQuantidade(corpo.Value, ReprocessadorDlq.QuantidadeMaxima, out var quantidade)) return Results.UnprocessableEntity(new { codigo = "quantidade_invalida" });
+    var autor = http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? http.User.Identity?.Name ?? "desconhecido";
+    return Results.Accepted(value: await reprocessador.ReprocessarAsync(quantidade, autor, ct));
+}).RequireAuthorization("AdministrarSagas");
 app.Run();
+return 0;
 public partial class Program;

@@ -1,3 +1,4 @@
+using AutoReparos.OS.Application;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -28,6 +29,7 @@ public class AuthorizationContracts
             services.RemoveAll<DbContextOptions<OrdemServicoDbContext>>();
             services.RemoveAll<OrdemServicoDbContext>();
             services.AddDbContext<OrdemServicoDbContext>(o => o.UseNpgsql(db.GetConnectionString()));
+            services.AddSingleton<ICadastros, CadastrosAceitaTudo>();
             services.AddAuthentication(o => { o.DefaultAuthenticateScheme = "Test"; o.DefaultChallengeScheme = "Test"; o.DefaultForbidScheme = "Test"; })
                 .AddScheme<AuthenticationSchemeOptions, RoleAuth>("Test", _ => { });
         }));
@@ -79,4 +81,11 @@ public sealed class RoleAuth(IOptionsMonitor<AuthenticationSchemeOptions> option
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "teste"), new Claim(ClaimTypes.Role, role.ToString())], Scheme.Name);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
     }
+}
+
+/// <summary>Cadastros que aceita qualquer cliente e veículo: estes testes cobrem autorização, não a validação do Cadastros.</summary>
+public sealed class CadastrosAceitaTudo : ICadastros
+{
+    public Task<ResultadoValidacaoCadastro> ValidarAsync(Guid clienteId, Guid veiculoId, string? authorization, CancellationToken cancellationToken) =>
+        Task.FromResult(ResultadoValidacaoCadastro.Valido);
 }

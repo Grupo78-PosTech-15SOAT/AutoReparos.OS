@@ -44,6 +44,7 @@ public abstract class SagaRotaBase(SagaAmbiente ambiente) : IAsyncLifetime
         Fabrica = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddDbContext<OrdemServicoDbContext>(o => o.UseNpgsql(ambiente.PostgresConnection));
+            services.AddSingleton<ICadastros, CadastrosAceitaTudo>();
             services.AddScoped<IOrdemServicoRepository>(sp => new RepositorioOSComFalha(sp.GetRequiredService<OrdemServicoDbContext>(), Controle));
             services.AddAuthentication(o => { o.DefaultAuthenticateScheme = "Test"; o.DefaultChallengeScheme = "Test"; o.DefaultForbidScheme = "Test"; })
                 .AddScheme<AuthenticationSchemeOptions, TestAuth>("Test", _ => { });
@@ -108,7 +109,7 @@ public abstract class SagaRotaBase(SagaAmbiente ambiente) : IAsyncLifetime
     protected async Task<Guid> AprovarOrcamentoAsync(Guid ordemServicoId)
     {
         var orcamentoId = Guid.NewGuid();
-        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, ordemServicoId, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var resultado = await ReceberAsync(TiposMensagem.OrcamentoAprovado, ordemServicoId, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         Assert.Equal(DesfechoMensagem.Processada, resultado.Desfecho);
         return orcamentoId;
     }

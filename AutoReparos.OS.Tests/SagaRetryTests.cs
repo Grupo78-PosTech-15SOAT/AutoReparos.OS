@@ -40,7 +40,7 @@ public sealed class SagaRetryTests(SagaAmbiente ambiente) : SagaTestBase(ambient
         SagaRepositorioInstavel? instavel = null;
         var componentes = NovosComponentes(r => instavel = new SagaRepositorioInstavel(r) { FalhasRestantes = falhas });
         var (id, _, _) = await CriarOSAsync();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, Guid.NewGuid(), null, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         var resultado = await componentes.Processador.ProcessarAsync(corpo, CancellationToken.None);
 
