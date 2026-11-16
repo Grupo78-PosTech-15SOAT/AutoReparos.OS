@@ -3,3 +3,8 @@
 .vs/
 *.user
 TestResults/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
