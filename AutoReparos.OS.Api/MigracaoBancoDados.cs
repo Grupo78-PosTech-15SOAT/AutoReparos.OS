@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>
 /// Modo do Job de migration do chart (D-47, porta 7): com <c>Database:RunMigrations</c> ligado o processo só aplica as
 /// migrations pendentes e encerra, sem abrir HTTP.

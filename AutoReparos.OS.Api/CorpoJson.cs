@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AutoReparos.OS.Application.Saga;
 
+namespace AutoReparos.OS.Api;
+
 internal static class CorpoJson
 {
     public const int LimiteObservacao = 2000;

@@ -3,6 +3,8 @@ using Amazon.SQS.Model;
 using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Domain;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>Publica comandos da Saga nas filas do Execution, do Billing e do Cadastros e envia mensagens esgotadas à DLQ da Saga.</summary>
 public sealed class SqsEnvioComandos(IAmazonSQS sqs, IConfiguration configuration) : IEnvioComandos
 {

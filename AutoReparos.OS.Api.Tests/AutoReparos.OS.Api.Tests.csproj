@@ -24,4 +24,8 @@
     <ProjectReference Include="..\AutoReparos.OS.Api\AutoReparos.OS.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Tipos da API no namespace AutoReparos.OS.Api (S3903); Program.cs fica no namespace global. -->
+    <Using Include="AutoReparos.OS.Api" />
+  </ItemGroup>
 </Project>

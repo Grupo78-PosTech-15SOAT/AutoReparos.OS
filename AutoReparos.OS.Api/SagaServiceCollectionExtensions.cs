@@ -3,6 +3,8 @@ using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Infrastructure.Saga;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
+namespace AutoReparos.OS.Api;
+
 public static class SagaServiceCollectionExtensions
 {
     /// <summary>

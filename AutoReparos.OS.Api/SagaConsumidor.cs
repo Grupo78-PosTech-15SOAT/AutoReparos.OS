@@ -2,6 +2,8 @@ using Amazon.SQS;
 using Amazon.SQS.Model;
 using AutoReparos.OS.Application.Saga;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>
 /// Consome a fila <c>Sqs:SagaQueueUrl</c>. A mensagem só é apagada após processada ou enviada à DLQ. Cada mensagem é
 /// processada com tempo limitado (<c>Saga:LimiteProcessamentoMensagem</c>, padrão 60 s) e, antes de processar, o
