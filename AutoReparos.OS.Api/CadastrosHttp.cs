@@ -2,6 +2,8 @@ using System.Net;
 using System.Text.Json;
 using AutoReparos.OS.Application;
 
+namespace AutoReparos.OS.Api;
+
 /// <summary>Configuração do Cadastros (<c>Cadastros:BaseUrl</c> e <c>Cadastros:ChaveInterna</c>, esta vinda de um Secret do K8s).</summary>
 public sealed class OpcoesCadastros
 {
