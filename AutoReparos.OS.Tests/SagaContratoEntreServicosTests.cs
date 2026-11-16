@@ -39,7 +39,7 @@ public sealed class SagaContratoEntreServicosTests(SagaAmbiente ambiente) : Saga
     {
         await InserirOSDeReferenciaAsync();
         var id = Guid.Parse(OrdemServicoReferencia);
-        await ReceberAsync(TiposMensagem.OrcamentoAprovado, id, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()));
+        await ReceberAsync(TiposMensagem.OrcamentoAprovado, id, ("orcamentoId", Guid.NewGuid()), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
 
         var concluida = await ReceberAsync(TiposMensagem.ExecucaoConcluida, id, ("execucaoId", Guid.NewGuid()));
 

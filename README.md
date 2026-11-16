@@ -134,6 +134,11 @@ Envelope JSON em camelCase: `eventId`, `tipo`, `correlacaoId`, `ordemServicoId`,
 | `ordem-servico.liberada.v1` | `Sqs__ExecucaoQueueUrl` | `id`, `clienteId`, `veiculoId` (lidos da OS) |
 | `execucao.cancelar.v1` | `Sqs__ExecucaoQueueUrl` | `motivo` |
 | `cobranca.cancelar-orcamento.v1` | `Sqs__BillingQueueUrl` | `orcamentoId`, `motivo` (etapas/comandos persistidos com o alias legado `billing.orcamento.cancelar.v1` são normalizados antes do envio) |
+| `execucao.reservar-insumos.v1` | `Sqs__ExecucaoQueueUrl` | `itens` `{insumoId, quantidade}`, vindos de `orcamento.aprovado.v1`; a execução só é liberada com `insumos.reservados.v1` |
+| `execucao.cancelar-reserva.v1` | `Sqs__ExecucaoQueueUrl` | `motivo`; só sai depois de `insumos.reservados.v1` ou `insumos.reserva-falhou.v1` |
+| `saga.lembrete.v1` | `Sqs__CadastrosQueueUrl` | `clienteId`, `motivo` (`aguardando-pagamento` a cada 24 h; `aguardando-insumos` junto do alerta diário); nunca cancela nem expira o orçamento |
+
+Operação (perfil `Administrador`): `GET /api/v1/admin/sagas`, `GET /api/v1/admin/sagas/{ordemServicoId}`, `POST /api/v1/admin/sagas/{ordemServicoId}/retentar` e `POST /api/v1/admin/dlq/reprocessar` (`{"quantidade": 1 a 100}`), que devolve as mensagens da DLQ da Saga à fila de origem escolhida pelo `tipo` e alerta `saga.dlq-reprocessada` com o autor.
 
 O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md` do repositório principal.
 
@@ -143,6 +148,7 @@ O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md
 - **Retomada**: o despachador em segundo plano lê um índice esparso com as Sagas que têm comando ou sincronização pendente e continua de onde parou, inclusive ao iniciar o processo.
 - **Retry técnico**: 5 tentativas, backoff exponencial (base 1 s, teto 30 s) com jitter de até 50% do atraso; ao esgotar, a mensagem ou o comando vai à DLQ (`Sqs__SagaDeadLetterQueueUrl`) e gera o alerta `saga.mensagem-esgotada` ou `saga.comando-esgotado`. Mensagem malformada ou de `tipo` desconhecido vai direto à DLQ (`saga.mensagem-invalida`). Um comando de compensação esgotado leva a Saga a `CompensacaoFalhou` (`saga.compensacao-falhou`).
 - **Prazo da compensação**: o estado `Compensando` sem confirmação no prazo `Saga__PrazoCompensacao` (padrão 15 minutos, reiniciado a cada etapa compensada) gera o alerta `saga.compensacao-sem-resposta` e leva a Saga a `CompensacaoFalhou`; o despachador avalia o prazo (índice esparso) e o relógio é injetável nos testes.
+- **Prazos técnicos da reserva e da liberação**: a reserva sem `insumos.reservados.v1` ou `insumos.reserva-falhou.v1` em `Saga__PrazoReserva` é reenviada (comando novo, `eventId` novo; a Execução é idempotente por OS) até `Saga__MaxReenvios` vezes e, esgotados, a Saga compensa com o motivo `liberacao_sem_resposta` (alertas `saga.passo-reenviado` e `saga.passo-sem-resposta`); a reserva sem resposta é tratada como possivelmente feita e `execucao.cancelar-reserva.v1` sai mesmo sem confirmação. A liberação só tem prazo enquanto o comando não foi entregue. A compensação sem confirmação também é reenviada até `Saga__MaxReenvios` vezes antes de `CompensacaoFalhou`.
 - **Comando esgotado**: vai à DLQ com alerta e **não há reenvio automático** depois disso; a recuperação é intervenção humana. Um comando de compensação esgotado leva a `CompensacaoFalhou`; uma `ordem-servico.liberada.v1` esgotada deixa a Saga em `ExecucaoLiberada` até alguém agir.
 - **Ids das confirmações**: `correlacaoId`, `orcamentoId` e `execucaoId` informados devem coincidir com os da Saga; a divergência é rejeitada, registrada e alertada (`saga.mensagem-divergente`). O `execucaoId` é guardado quando o Execution o informa (`execucao.concluida.v1` ou `execucao.falhou.v1`).
 - **Motivo**: `ordem-servico.cancelar.v1` exige `motivo` de 1 a 2000 caracteres sem NUL; nos demais tipos o `motivo` é opcional, mas acima de 2000 caracteres ou com NUL a mensagem vai à DLQ. O motivo usado nos comandos de compensação é limitado a 2000 caracteres.
@@ -160,6 +166,9 @@ O contrato completo está em `.specs/features/fase4/saga-mensageria/contracts.md
 | `Sqs__SagaDeadLetterQueueUrl` | DLQ da Saga |
 | `Sqs__ExecucaoQueueUrl` | fila do Execution (`Sqs:LiberadasQueueUrl` do Execution) |
 | `Sqs__BillingQueueUrl` | fila de comandos do Billing (`Sqs:ComandosQueueUrl` do Billing) |
+| `Sqs__CadastrosQueueUrl` | fila do Cadastros, que recebe os lembretes `saga.lembrete.v1` |
+| `Saga__PrazoReserva`, `Saga__PrazoLiberacao` | prazo técnico da reserva de insumos e da entrega da liberação (padrão `00:02:00` cada; maior que zero) |
+| `Saga__MaxReenvios` | reenvios de um passo sem resposta (reserva, liberação ou compensação) antes de compensar ou falhar (padrão `3`) |
 | `DynamoDb__ServiceUrl` | opcional; endpoint do DynamoDB Local em desenvolvimento e teste |
 | `DynamoDb__TabelaSaga`, `DynamoDb__TabelaEventos` | nomes das tabelas (padrão `autoreparos-os-saga` e `autoreparos-os-saga-eventos`) |
 | `DynamoDb__CriarTabelas` | `true` cria as tabelas e o índice se não existirem (apenas ambiente local e de teste) |

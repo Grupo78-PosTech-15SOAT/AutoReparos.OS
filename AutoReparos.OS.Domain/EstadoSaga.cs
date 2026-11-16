@@ -9,7 +9,11 @@ public enum EstadoSaga
     PagamentoCapturado,
     Compensando,
     Compensada,
-    CompensacaoFalhou
+    CompensacaoFalhou,
+    /// <summary>Reserva de insumos pedida à Execução e ainda sem resposta (passo pendente: aplica a trava 409 <c>saga_em_andamento</c>).</summary>
+    ReservandoInsumos,
+    /// <summary>Sem saldo (D-20): nada foi reservado, o orçamento não é compensado; a equipe retenta ou cancela.</summary>
+    AguardandoInsumos
 }
 
 public enum SituacaoEtapa
@@ -37,5 +41,7 @@ public enum StatusPagamento
 public enum DestinoComando
 {
     Execucao,
-    Billing
+    Billing,
+    /// <summary>Lembretes de negócio (<c>saga.lembrete.v1</c>), entregues ao Cadastros para notificar o cliente.</summary>
+    Cadastros
 }

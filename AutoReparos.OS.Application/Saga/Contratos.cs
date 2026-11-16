@@ -26,6 +26,9 @@ public interface ISagaRepositorio
     /// </summary>
     Task<ResultadoGravacao> GravarAsync(SagaOS saga, EventoProcessado? evento, CancellationToken cancellationToken);
 
+    /// <summary>Console administrativo: Sagas filtradas por estado e por inatividade (<c>atualizadoEm</c> até o instante dado). Varredura: o volume do console é pequeno.</summary>
+    Task<IReadOnlyList<SagaOS>> ListarAsync(EstadoSaga? estado, DateTimeOffset? atualizadaAte, CancellationToken cancellationToken);
+
     /// <summary>Ids das Sagas com sincronização ou comando pendente devido até <paramref name="ate"/>.</summary>
     Task<IReadOnlyList<Guid>> ListarComTrabalhoPendenteAsync(DateTimeOffset ate, CancellationToken cancellationToken);
 }

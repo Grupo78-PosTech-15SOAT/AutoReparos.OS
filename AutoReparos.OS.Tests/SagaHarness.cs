@@ -140,6 +140,8 @@ public sealed class SagaRepositorioInstavel(ISagaRepositorio inner) : ISagaRepos
 
     public Task<ResultadoGravacao> GravarAsync(SagaOS saga, EventoProcessado? evento, CancellationToken cancellationToken) => inner.GravarAsync(saga, evento, cancellationToken);
 
+    public Task<IReadOnlyList<SagaOS>> ListarAsync(EstadoSaga? estado, DateTimeOffset? atualizadaAte, CancellationToken cancellationToken) => inner.ListarAsync(estado, atualizadaAte, cancellationToken);
+
     public Task<IReadOnlyList<Guid>> ListarComTrabalhoPendenteAsync(DateTimeOffset ate, CancellationToken cancellationToken) => inner.ListarComTrabalhoPendenteAsync(ate, cancellationToken);
 }
 
@@ -200,7 +202,7 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
     }
 
     /// <summary>Instâncias novas sobre as mesmas tabelas: simula o reinício do processo.</summary>
-    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null, TimeSpan? prazoCompensacao = null)
+    protected Componentes NovosComponentes(Func<ISagaRepositorio, ISagaRepositorio>? decorar = null, EnvioFalso? envio = null, TimeSpan? prazoCompensacao = null, int maxReenvios = 0, TimeSpan? prazoReserva = null, TimeSpan? prazoLiberacao = null)
     {
         envio ??= new EnvioFalso();
         var alertas = new AlertadorFalso();
@@ -208,7 +210,10 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
         {
             Aleatorio = () => 0.5,
             Aguardar = (atraso, _) => { lock (Esperas) Esperas.Add(atraso); return Task.CompletedTask; },
-            PrazoCompensacao = prazoCompensacao ?? TimeSpan.FromMinutes(15)
+            PrazoCompensacao = prazoCompensacao ?? TimeSpan.FromMinutes(15),
+            MaxReenvios = maxReenvios,
+            PrazoReserva = prazoReserva ?? TimeSpan.FromMinutes(2),
+            PrazoLiberacao = prazoLiberacao ?? TimeSpan.FromMinutes(2)
         };
         ISagaRepositorio sagas = new DynamoDbSagaRepositorio(Dynamo, TabelasDynamo, Relogio);
         if (decorar is not null) sagas = decorar(sagas);
@@ -248,7 +253,7 @@ public abstract class SagaTestBase(SagaAmbiente ambiente) : IAsyncLifetime
         var (id, clienteId, veiculoId) = await CriarOSAsync();
         var orcamentoId = Guid.NewGuid();
         var correlacao = correlacaoId ?? Guid.NewGuid();
-        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()));
+        var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", Guid.NewGuid()), ("itens", Array.Empty<object>()));
         var resultado = await (em ?? Atual).Processador.ProcessarAsync(corpo, CancellationToken.None);
         Assert.Equal(DesfechoMensagem.Processada, resultado.Desfecho);
         return new SagaIniciada(id, orcamentoId, clienteId, veiculoId, correlacao);

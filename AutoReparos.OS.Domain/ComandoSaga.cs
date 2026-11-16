@@ -40,6 +40,18 @@ public sealed class ComandoSaga
         CriadoEm = agora;
     }
 
+    /// <summary>Cópia para reenvio: mesmo conteúdo, novo <c>eventId</c> (também no corpo) e contadores zerados.</summary>
+    internal ComandoSaga Reenvio(Guid novoEventId, DateTimeOffset agora)
+    {
+        var corpo = Corpo;
+        if (JsonNode.Parse(Corpo) is JsonObject objeto)
+        {
+            objeto["eventId"] = novoEventId.ToString();
+            corpo = objeto.ToJsonString(JsonNormalizacao);
+        }
+        return new ComandoSaga(novoEventId, Tipo, Destino, EtapaCompensada, corpo, agora);
+    }
+
     internal void MarcarEnviado(DateTimeOffset agora)
     {
         EnviadoEm = agora;
@@ -92,7 +104,8 @@ public sealed class ComandoSaga
 public sealed record RegistroSaga(DateTimeOffset Em, string Evento, Guid? EventId, string Descricao);
 
 /// <summary>Resultado de aplicar uma mensagem à Saga. Rejeições são registradas na própria Saga (idempotente).</summary>
-public sealed record Transicao(bool Aceita, string? Motivo = null, string? CodigoAlerta = null)
+/// <remarks><paramref name="Reentregavel"/>: a rejeição é só um adiamento (ex.: cancelamento durante a reserva); o <c>eventId</c> não é consumido e a mesma mensagem pode ser aplicada depois.</remarks>
+public sealed record Transicao(bool Aceita, string? Motivo = null, string? CodigoAlerta = null, bool Reentregavel = false)
 {
     public static readonly Transicao Ok = new(true);
 }
