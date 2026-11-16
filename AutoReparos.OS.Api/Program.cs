@@ -19,8 +19,10 @@ builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
+        .AddSource("AutoReparos.OS.Mensageria")
         .AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint)))
     .WithMetrics(metrics => metrics
+        .AddMeter(TelemetriaSaga.NomeMeter)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddRuntimeInstrumentation()
