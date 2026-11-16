@@ -54,6 +54,7 @@ builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
 builder.Services.AddHostedService<PublicadorSqs>();
 builder.Services.AddSagaOS(builder.Configuration);
 var app = builder.Build();
+if (app.Configuration.GetValue<bool>(MigracaoBancoDados.MigrarESair)) return await MigracaoBancoDados.MigrarESairAsync<OrdemServicoDbContext>(app);
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -175,4 +176,5 @@ app.MapPost("/api/v1/admin/dlq/reprocessar", async (HttpContext http, Reprocessa
     return Results.Accepted(value: await reprocessador.ReprocessarAsync(quantidade, autor, ct));
 }).RequireAuthorization("AdministrarSagas");
 app.Run();
+return 0;
 public partial class Program;
