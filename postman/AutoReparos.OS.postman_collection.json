@@ -1,0 +1,324 @@
+{
+  "info": {
+    "name": "AutoReparos.OS",
+    "description": "Rotas do serviço de ordens de serviço. Defina baseUrl e token (JWT com os papéis exigidos: OperarOS, CancelarOS ou AdministrarSagas).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "ordemServicoId",
+      "value": ""
+    },
+    {
+      "key": "clienteId",
+      "value": ""
+    },
+    {
+      "key": "veiculoId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Saúde",
+      "item": [
+        {
+          "name": "Health check (anônimo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Probe do kubelet e do ALB; não exige token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ordens de serviço",
+      "item": [
+        {
+          "name": "Abrir OS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ordens-servico",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico"
+              ]
+            },
+            "description": "201 com id e status; 404 cliente_nao_encontrado ou veiculo_nao_encontrado; 422 veiculo_de_outro_cliente; 503 cadastros_indisponivel.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": \"{{clienteId}}\",\n  \"veiculoId\": \"{{veiculoId}}\",\n  \"observacao\": \"Barulho na suspensão\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Consultar OS",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "description": "200 com a OS e o histórico de status; 404 se não existir."
+          }
+        },
+        {
+          "name": "Atualizar observação da OS",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ordens-servico/{{ordemServicoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "description": "200 com id, status e observação; 404; 409 ordem_servico_conflito.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"observacao\": \"Cliente pediu revisão dos freios\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancelar OS (papel Administrador ou Atendente)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ordens-servico/{{ordemServicoId}}/cancelamento",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ordens-servico",
+                "{{ordemServicoId}}",
+                "cancelamento"
+              ]
+            },
+            "description": "202 com ordemServicoId, correlacaoId e estado; 404; 409 cancelamento_indisponivel ou saga_em_andamento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Cliente desistiu\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Console de Sagas (admin)",
+      "item": [
+        {
+          "name": "Listar Sagas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/sagas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "sagas"
+              ],
+              "query": [
+                {
+                  "key": "estado",
+                  "value": "AguardandoInsumos",
+                  "disabled": true
+                },
+                {
+                  "key": "paradaHaMinutos",
+                  "value": "30",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Filtros opcionais: estado (nome do EstadoSaga) e paradaHaMinutos."
+          }
+        },
+        {
+          "name": "Detalhar Saga",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/sagas/{{ordemServicoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "sagas",
+                "{{ordemServicoId}}"
+              ]
+            },
+            "description": "Etapas, comandos, itens e registros da Saga; 404 se não existir."
+          }
+        },
+        {
+          "name": "Retentar reserva de insumos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/sagas/{{ordemServicoId}}/retentar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "sagas",
+                "{{ordemServicoId}}",
+                "retentar"
+              ]
+            },
+            "description": "202; 404; 409 saga_em_andamento ou retentativa_indisponivel.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Saldo reposto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "DLQ (admin)",
+      "item": [
+        {
+          "name": "Reprocessar mensagens da DLQ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/dlq/reprocessar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "dlq",
+                "reprocessar"
+              ]
+            },
+            "description": "202 com o resultado do reprocessamento; 422 quantidade_invalida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantidade\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
