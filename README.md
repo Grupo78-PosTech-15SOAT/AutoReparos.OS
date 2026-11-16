@@ -180,9 +180,31 @@ O provisionamento real do DynamoDB e das filas (capacidade, backup, alarmes, TTL
 
 Os testes (`dotnet test AutoReparos.OS.Tests`) usam DynamoDB Local e PostgreSQL via Testcontainers (Docker necessário) e um SQS falso. A documentação da Saga é verificada por `python scripts/assert_saga_readme.py --name saga-rationale --strategy orchestrated --state-store DynamoDB`; o teste do verificador roda com `python -m unittest discover -s scripts -p "test_*.py"`.
 
+## Arquitetura
+
+O OS é o dono do ciclo de vida da ordem de serviço e o orquestrador da Saga (decisão registrada em `.specs/features/fase4/especificacao/saga` e `microsservicos`). Os serviços da Fase 4 são independentes, cada um com repositório, banco e pipeline próprios: **Cadastros** (clientes e veículos), **OS** (este serviço), **Cobrança** (orçamento e pagamento) e **Execução** (fila, etapas e insumos).
+
+- **Camadas** (solução `AutoReparos.OS.slnx`): `Domain` (OS, histórico, estados e contrato de mensagens), `Application` (orquestrador, processador de mensagens, despachador e console da Saga), `Infrastructure` (EF Core/PostgreSQL, DynamoDB, SQS) e `Api` (rotas mínimas, autenticação JWT e papéis).
+- **Banco da OS**: PostgreSQL (`os_db`), com a OS, o histórico de status e a Outbox gravados na mesma transação.
+- **Estado da Saga**: DynamoDB, tabelas `autoreparos-os-saga` e `autoreparos-os-saga-eventos` (nomes configuráveis), acessadas por chave (id da OS) com escrita condicional; a deduplicação das mensagens usa o `eventId`.
+- **Filas** (SQS): o OS consome a fila da Saga (`Sqs__SagaQueueUrl`, com DLQ própria) e envia comandos às filas do Execução, da Cobrança e do Cadastros (`Sqs__ExecucaoQueueUrl`, `Sqs__BillingQueueUrl`, `Sqs__CadastrosQueueUrl`). O publicador da Outbox usa `Sqs__QueueUrl` e `Sqs__DeadLetterQueueUrl`. Detalhes de cada variável em [Configuração](#configuração).
+- **Cobrança e Execução**: a comunicação é assíncrona, por mensagens versionadas (`*.v1`), com entrega pelo menos uma vez; o OS envia `ordem-servico.liberada.v1`, `execucao.reservar-insumos.v1` e os comandos de compensação, e recebe `orcamento.aprovado.v1`, `execucao.concluida.v1`, `pagamento.resultado.v1` e as demais respostas do [contrato](#contrato-de-mensagens-resumo-v1). Não há chamada síncrona entre eles para o fluxo da Saga.
+- **Cadastros**: única chamada síncrona, REST, na abertura da OS: valida cliente e veículo (`GET /api/v1/clientes/{id}` e `GET /api/v1/veiculos/{id}`), repassando o JWT de quem abre a OS ou a chave interna `X-Chave-Interna`.
+- **API**: `/api/v1/ordens-servico` (abrir, consultar, alterar observação, cancelar), `/api/v1/admin/sagas` (console de Sagas) e `/api/v1/admin/dlq/reprocessar`. A coleção Postman está em `postman/AutoReparos.OS.postman_collection.json`.
+
+## Cobertura
+
+O limite mínimo de cobertura de linhas é de **80%**. O job `test` do `.github/workflows/ci-cd.yml` coleta a cobertura (coverlet, formatos cobertura e opencover, sem `Migrations` e `obj`) dos projetos `AutoReparos.OS.Tests` e `AutoReparos.OS.Api.Tests` e o passo `.github/scripts/verificar_cobertura.py TestResults --minimo 80` reprova o pipeline abaixo do limite (variável `MINIMO_COBERTURA`). O job `quality` envia a análise ao SonarCloud, que mostra o resultado atual do projeto: https://sonarcloud.io/project/overview?id=Grupo78-PosTech-15SOAT_AutoReparos.OS . O percentual vigente fica nesses dois lugares; este README não o repete para não ficar desatualizado.
+
+Para medir localmente: `dotnet test AutoReparos.OS.Tests --collect:"XPlat Code Coverage"` (Docker necessário).
+
+## Testes BDD
+
+O projeto `AutoReparos.OS.BddTests` (Reqnroll + xUnit, cenários em português nos arquivos `.feature`) exercita a Saga real (orquestrador, PostgreSQL e DynamoDB Local por Testcontainers) com Cobrança e Execução simuladas pelas mensagens que enviariam, reaproveitando o `SagaHarness` de `AutoReparos.OS.Tests`. Cenários: fluxo completo com pagamento capturado; pagamento recusado (sem compensação, a Saga aguarda); falha na reserva de insumos (aguarda saldo; o cancelamento compensa só o orçamento); liberação recusada (compensa o orçamento). Execução: `dotnet test AutoReparos.OS.BddTests` (Docker necessário).
+
 ## CI/CD e configuração do repositório
 
-O pipeline `.github/workflows/ci-cd.yml` roda em pull request para `main` e em push na `develop` e na `main`, com os jobs `build` (compila e confere `dotnet format`), `test` (testes de `AutoReparos.OS.Tests` e `AutoReparos.OS.Api.Tests`, cobertura mínima de linhas de 80%) e `quality` (SonarCloud).
+O pipeline `.github/workflows/ci-cd.yml` roda em pull request para `main` e em push na `develop` e na `main`, com os jobs `build` (compila e confere `dotnet format`), `test` (testes de `AutoReparos.OS.Tests`, `AutoReparos.OS.Api.Tests` e BDD de `AutoReparos.OS.BddTests`, cobertura mínima de linhas de 80%) e `quality` (SonarCloud).
 
 Para o job `quality` passar, o repositório precisa destes itens em **Settings → Secrets and variables → Actions**:
 
