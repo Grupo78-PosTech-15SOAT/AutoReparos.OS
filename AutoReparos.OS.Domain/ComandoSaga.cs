@@ -36,8 +36,16 @@ public sealed class ComandoSaga
         Tipo = tipo;
         Destino = destino;
         EtapaCompensada = etapaCompensada;
-        Corpo = corpo;
+        Corpo = ComContextoTrace(corpo);
         CriadoEm = agora;
+    }
+
+    /// <summary>Grava no corpo o contexto de trace da <c>Activity</c> corrente, na mesma transação do comando; um corpo que já tem <c>traceparent</c> (reenvio) fica como está.</summary>
+    private static string ComContextoTrace(string corpo)
+    {
+        if (System.Diagnostics.Activity.Current is null || JsonNode.Parse(corpo) is not JsonObject objeto || objeto.ContainsKey(ContextoTrace.CampoTraceparent)) return corpo;
+        ContextoTrace.Injetar(objeto);
+        return objeto.ContainsKey(ContextoTrace.CampoTraceparent) ? objeto.ToJsonString(JsonNormalizacao) : corpo;
     }
 
     /// <summary>Cópia para reenvio: mesmo conteúdo, novo <c>eventId</c> (também no corpo) e contadores zerados.</summary>
