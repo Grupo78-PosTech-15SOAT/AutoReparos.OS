@@ -13,15 +13,22 @@ public sealed class ContextoSaga(SagaAmbiente ambiente) : SagaTestBase(ambiente)
     public SagaIniciada? Saga { get; private set; }
     public Guid OrdemServicoId => Saga!.OrdemServicoId;
     public IReadOnlyList<string> Enviados => Atual.Envio.TiposEnviados.ToList();
+    /// <summary>Comandos de compensação enviados, na ordem de envio (os tipos <c>*.cancelar*</c> que a Saga despacha).</summary>
+    public IReadOnlyList<string> Compensacoes => Enviados.Where(t => t.Contains("cancelar", StringComparison.Ordinal)).ToList();
     public IReadOnlyList<string> Alertas => Atual.Alertas.Codigos;
 
     /// <summary>Aprova o orçamento da OS com insumos: a Saga passa a reservar insumos no Execução.</summary>
-    public async Task AprovarOrcamentoComInsumosAsync()
+    public Task AprovarOrcamentoComInsumosAsync() =>
+        AprovarOrcamentoAsync([new { insumoId = Oleo, quantidade = 4 }, new { insumoId = Filtro, quantidade = 1 }]);
+
+    /// <summary>Aprova um orçamento só de mão de obra (lista de itens vazia): não há o que reservar.</summary>
+    public Task AprovarOrcamentoSemInsumosAsync() => AprovarOrcamentoAsync([]);
+
+    private async Task AprovarOrcamentoAsync(object[] itens)
     {
         var (id, clienteId, veiculoId) = await CriarOSAsync();
         var orcamentoId = Guid.NewGuid();
         var correlacao = Guid.NewGuid();
-        var itens = new[] { new { insumoId = Oleo, quantidade = 4 }, new { insumoId = Filtro, quantidade = 1 } };
         var (corpo, _) = Mensagem(TiposMensagem.OrcamentoAprovado, id, correlacao, null, ("orcamentoId", orcamentoId), ("clienteId", clienteId), ("itens", itens));
         Assert.Equal(DesfechoMensagem.Processada, (await Atual.Processador.ProcessarAsync(corpo, CancellationToken.None)).Desfecho);
         Saga = new SagaIniciada(id, orcamentoId, clienteId, veiculoId, correlacao);

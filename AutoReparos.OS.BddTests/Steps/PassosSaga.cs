@@ -9,6 +9,9 @@ public sealed class PassosSaga(ContextoSaga saga)
     [Given("uma ordem de serviço com orçamento aprovado e insumos a reservar")]
     public Task DadoOrcamentoAprovadoComInsumos() => saga.AprovarOrcamentoComInsumosAsync();
 
+    [Given("uma ordem de serviço com orçamento aprovado sem insumos")]
+    public Task DadoOrcamentoAprovadoSemInsumos() => saga.AprovarOrcamentoSemInsumosAsync();
+
     [Given("o Execução confirma a reserva dos insumos")]
     [When("o Execução confirma a reserva dos insumos")]
     public Task QuandoReservaConfirmada() => saga.ReceberInsumosReservadosAsync();
@@ -29,6 +32,9 @@ public sealed class PassosSaga(ContextoSaga saga)
     [When("o atendente cancela a ordem de serviço")]
     public Task QuandoCancelamento() => saga.ReceberAsync(TiposMensagem.OrdemServicoCancelar, ("motivo", "sem previsão de estoque"));
 
+    [When("o Execução confirma o cancelamento da execução")]
+    public Task QuandoExecucaoCancelada() => saga.ReceberAsync(TiposMensagem.ExecucaoCancelada, ("execucaoId", Guid.NewGuid()));
+
     [When("o Execução confirma o cancelamento da reserva dos insumos")]
     public Task QuandoReservaCancelada() => saga.ReceberReservaCanceladaAsync();
 
@@ -44,8 +50,11 @@ public sealed class PassosSaga(ContextoSaga saga)
     [Then("a Saga enviou, nesta ordem, os comandos {string}")]
     public void EntaoComandos(string comandos) => Assert.Equal(comandos.Split(',', StringSplitOptions.TrimEntries), saga.Enviados);
 
+    [Then("a Saga enviou, nesta ordem, os comandos de compensação {string}")]
+    public void EntaoCompensacoes(string comandos) => Assert.Equal(comandos.Split(',', StringSplitOptions.TrimEntries), saga.Compensacoes);
+
     [Then("nenhum comando de compensação foi enviado")]
-    public void EntaoSemCompensacao() => Assert.DoesNotContain(saga.Enviados, t => t.Contains("cancelar", StringComparison.Ordinal));
+    public void EntaoSemCompensacao() => Assert.Empty(saga.Compensacoes);
 
     [Then("a Saga alertou {string}")]
     public void EntaoAlerta(string codigo) => Assert.Contains(codigo, saga.Alertas);
