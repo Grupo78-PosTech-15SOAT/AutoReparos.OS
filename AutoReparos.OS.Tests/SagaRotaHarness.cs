@@ -3,7 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Amazon;
 using Amazon.DynamoDBv2;
+using Amazon.Runtime;
+using Amazon.SQS;
 using AutoReparos.OS.Application;
 using AutoReparos.OS.Application.Saga;
 using AutoReparos.OS.Domain;
@@ -54,6 +57,8 @@ public abstract class SagaRotaBase(SagaAmbiente ambiente) : IAsyncLifetime
             services.AddSingleton<IAlertador>(Alertas);
             services.AddSingleton<TimeProvider>(Relogio);
             services.AddSingleton(opcoes);
+            // Cliente SQS com região fixa: sem AWS_REGION na máquina o AmazonSQSClient do Program não sobe (os testes que usam SQS registram o próprio falso depois).
+            services.AddSingleton<IAmazonSQS>(new AmazonSQSClient(new AnonymousAWSCredentials(), new AmazonSQSConfig { RegionEndpoint = RegionEndpoint.USEast1 }));
         }));
         using var scope = Fabrica.Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<OrdemServicoDbContext>().Database.MigrateAsync();

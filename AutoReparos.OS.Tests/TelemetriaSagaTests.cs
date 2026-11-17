@@ -59,6 +59,7 @@ public sealed class TelemetriaSagaTests(SagaAmbiente ambiente) : SagaTestBase(am
         var captura = Guid.NewGuid();
         await PagamentoAsync(s.OrdemServicoId, "Capturado", captura);
         await PagamentoAsync(s.OrdemServicoId, "Capturado", captura);
+        await PagamentoAsync(s.OrdemServicoId, "Capturado");
 
         Assert.Equal(EstadoSaga.PagamentoCapturado, (await SagaAsync(s.OrdemServicoId)).Estado);
         Assert.Equal(1, Soma("sagas_iniciadas_total"));
@@ -106,6 +107,7 @@ public sealed class TelemetriaSagaTests(SagaAmbiente ambiente) : SagaTestBase(am
     {
         Ouvir();
         var parada = await IniciarSagaAsync();
+        await IniciarSagaAsync();
         var concluida = await IniciarSagaAsync();
         await ReceberAsync(TiposMensagem.ExecucaoConcluida, concluida.OrdemServicoId);
         await PagamentoAsync(concluida.OrdemServicoId, "Capturado");
@@ -116,7 +118,7 @@ public sealed class TelemetriaSagaTests(SagaAmbiente ambiente) : SagaTestBase(am
         await coletor.ColetarAsync(CancellationToken.None);
 
         Assert.Equal(EstadoSaga.ExecucaoLiberada, (await SagaAsync(parada.OrdemServicoId)).Estado);
-        Assert.Equal([1L], Observar("sagas_paradas"));
+        Assert.Equal([2L], Observar("sagas_paradas"));
         Assert.Equal([7L], Observar("saga_dlq_mensagens"));
     }
 
