@@ -106,7 +106,7 @@ namespace AutoReparos.OS.BddTests.Features
         
         private static global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages InitializeCucumberMessages()
         {
-            return new global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages("Features/FluxoCompletoDaOS.feature.ndjson", 3);
+            return new global::Reqnroll.Formatters.RuntimeSupport.FeatureLevelCucumberMessages("Features/FluxoCompletoDaOS.feature.ndjson", 4);
         }
         
         async global::System.Threading.Tasks.Task global::Xunit.IAsyncLifetime.InitializeAsync()
@@ -177,17 +177,78 @@ namespace AutoReparos.OS.BddTests.Features
     await testRunner.ThenAsync("a Saga está no estado \"ExecucaoConcluida\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
 #line 13
-    await testRunner.WhenAsync("a Cobrança informa o pagamento \"Capturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+    await testRunner.AndAsync("a ordem de serviço está com o status \"Concluida\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
 #line 14
-    await testRunner.ThenAsync("a Saga está no estado \"PagamentoCapturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+    await testRunner.WhenAsync("a Cobrança informa o pagamento \"Capturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
 #line 15
-    await testRunner.AndAsync("a ordem de serviço está com o status \"Paga\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+    await testRunner.ThenAsync("a Saga está no estado \"PagamentoCapturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
 #line 16
+    await testRunner.AndAsync("a ordem de serviço está com o status \"Paga\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 17
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos \"execucao.reservar-insumos.v1, ordem-serv" +
                         "ico.liberada.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+            }
+            await this.ScenarioCleanupAsync();
+        }
+        
+        [global::Xunit.SkippableFactAttribute(DisplayName="OS só de mão de obra pula a reserva e libera a execução direto")]
+        [global::Xunit.TraitAttribute("FeatureTitle", "Fluxo completo da ordem de serviço na Saga")]
+        [global::Xunit.TraitAttribute("Description", "OS só de mão de obra pula a reserva e libera a execução direto")]
+        public async global::System.Threading.Tasks.Task OSSoDeMaoDeObraPulaAReservaELiberaAExecucaoDireto()
+        {
+            string[] tagsOfScenario = ((string[])(null));
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
+            string pickleIndex = "1";
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("OS só de mão de obra pula a reserva e libera a execução direto", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
+            string[] tagsOfRule = ((string[])(null));
+            global::Reqnroll.RuleInfo ruleInfo = null;
+#line 19
+  this.ScenarioInitialize(scenarioInfo, ruleInfo);
+#line hidden
+            if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
+            {
+                await testRunner.SkipScenarioAsync();
+            }
+            else
+            {
+                await this.ScenarioStartAsync();
+#line 20
+    await testRunner.GivenAsync("uma ordem de serviço com orçamento aprovado sem insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Dado ");
+#line hidden
+#line 21
+    await testRunner.ThenAsync("a Saga está no estado \"ExecucaoLiberada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+#line hidden
+#line 22
+    await testRunner.AndAsync("a ordem de serviço está com o status \"EmExecucao\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 23
+    await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos \"ordem-servico.liberada.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 24
+    await testRunner.WhenAsync("o Execução conclui a execução", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+#line hidden
+#line 25
+    await testRunner.ThenAsync("a Saga está no estado \"ExecucaoConcluida\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+#line hidden
+#line 26
+    await testRunner.AndAsync("a ordem de serviço está com o status \"Concluida\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 27
+    await testRunner.WhenAsync("a Cobrança informa o pagamento \"Capturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+#line hidden
+#line 28
+    await testRunner.ThenAsync("a Saga está no estado \"PagamentoCapturado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+#line hidden
+#line 29
+    await testRunner.AndAsync("a ordem de serviço está com o status \"Paga\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 30
+    await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos \"ordem-servico.liberada.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
