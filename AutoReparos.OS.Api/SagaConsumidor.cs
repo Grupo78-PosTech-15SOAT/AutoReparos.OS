@@ -67,6 +67,7 @@ public sealed class SagaConsumidor(IServiceProvider services, IConfiguration con
 
         using var limitado = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         limitado.CancelAfter(limite);
+        using var atividade = MensageriaTelemetria.IniciarConsumo(mensagem.Body);
         try
         {
             await processador.ProcessarAsync(mensagem.Body, limitado.Token);

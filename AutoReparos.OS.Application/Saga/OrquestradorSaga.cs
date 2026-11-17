@@ -47,6 +47,7 @@ public sealed class OrquestradorSaga(
             if (await sagas.EventoProcessadoAsync(mensagem.EventId, cancellationToken)) return ResultadoMensagem.Duplicada;
 
             var saga = await sagas.ObterAsync(mensagem.OrdemServicoId, cancellationToken);
+            var estadoAnterior = saga?.Estado;
             var agora = tempo.GetUtcNow();
             Transicao transicao;
             if (saga is null)
@@ -82,6 +83,7 @@ public sealed class OrquestradorSaga(
                 case ResultadoGravacao.ConflitoVersao:
                     continue;
             }
+            TelemetriaSaga.RegistrarGravacao(estadoAnterior, saga.Estado);
 
             if (transicao.CodigoAlerta is { } codigo)
                 alertador.Alertar(codigo, transicao.Motivo ?? DescreverAlerta(codigo, saga, mensagem), saga.OrdemServicoId, mensagem.EventId);
@@ -242,6 +244,7 @@ public sealed class OrquestradorSaga(
             try
             {
                 await envio.EnviarAsync(comando.Destino, comando.Corpo, cancellationToken);
+                if (comando.EtapaCompensada is not null) TelemetriaSaga.RegistrarCompensacao(comando.Tipo);
                 saga.RegistrarEnvio(comando.EventId, agora);
                 await GravarAsync(saga, null, cancellationToken);
                 return;
