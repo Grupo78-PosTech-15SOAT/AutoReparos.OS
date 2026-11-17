@@ -174,7 +174,14 @@ namespace AutoReparos.OS.BddTests.Features
     await testRunner.AndAsync("a ordem de serviço está com o status \"Concluida\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
 #line 12
+    await testRunner.AndAsync("o histórico da Saga registra o pagamento \"Rejeitado\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 13
     await testRunner.AndAsync("nenhum comando de compensação foi enviado", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 14
+    await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos \"execucao.reservar-insumos.v1, ordem-serv" +
+                        "ico.liberada.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
@@ -194,7 +201,7 @@ namespace AutoReparos.OS.BddTests.Features
                     "o", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 14
+#line 16
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -204,38 +211,38 @@ namespace AutoReparos.OS.BddTests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 15
+#line 17
     await testRunner.GivenAsync("uma ordem de serviço com orçamento aprovado e insumos a reservar", ((string)(null)), ((global::Reqnroll.Table)(null)), "Dado ");
 #line hidden
-#line 16
+#line 18
     await testRunner.WhenAsync("o Execução informa que não há saldo dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 17
+#line 19
     await testRunner.ThenAsync("a Saga está no estado \"AguardandoInsumos\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 18
+#line 20
     await testRunner.AndAsync("a Saga alertou \"saga.aguardando-insumos\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 19
+#line 21
     await testRunner.AndAsync("nenhum comando de compensação foi enviado", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 20
+#line 22
     await testRunner.WhenAsync("o atendente cancela a ordem de serviço", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 21
+#line 23
     await testRunner.ThenAsync("a Saga está no estado \"Compensando\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 22
+#line 24
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos \"execucao.reservar-insumos.v1, cobranca.c" +
                         "ancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 23
+#line 25
     await testRunner.WhenAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 24
+#line 26
     await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 25
+#line 27
     await testRunner.AndAsync("a ordem de serviço está com o status \"Cancelada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
             }
@@ -256,7 +263,7 @@ namespace AutoReparos.OS.BddTests.Features
                     "a", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 27
+#line 29
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -266,39 +273,39 @@ namespace AutoReparos.OS.BddTests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 28
+#line 30
     await testRunner.GivenAsync("uma ordem de serviço com orçamento aprovado e insumos a reservar", ((string)(null)), ((global::Reqnroll.Table)(null)), "Dado ");
 #line hidden
-#line 29
+#line 31
     await testRunner.AndAsync("o Execução confirma a reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 30
+#line 32
     await testRunner.WhenAsync("o Execução recusa a liberação da ordem de serviço", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 31
+#line 33
     await testRunner.ThenAsync("a Saga está no estado \"Compensando\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 32
+#line 34
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar-reserva" +
                         ".v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 33
+#line 35
     await testRunner.WhenAsync("o Execução confirma o cancelamento da reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 34
+#line 36
     await testRunner.ThenAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar-reserva" +
                         ".v1, cobranca.cancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 35
+#line 37
     await testRunner.WhenAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 36
+#line 38
     await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 37
+#line 39
     await testRunner.AndAsync("a ordem de serviço está com o status \"Cancelada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 38
+#line 40
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar-reserva" +
                         ".v1, cobranca.cancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
@@ -317,7 +324,7 @@ namespace AutoReparos.OS.BddTests.Features
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Cancelamento pelo atendente com insumos reservados compensa em ordem inversa", null, tagsOfScenario, argumentsOfScenario, featureTags, pickleIndex);
             string[] tagsOfRule = ((string[])(null));
             global::Reqnroll.RuleInfo ruleInfo = null;
-#line 40
+#line 42
   this.ScenarioInitialize(scenarioInfo, ruleInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -327,48 +334,48 @@ namespace AutoReparos.OS.BddTests.Features
             else
             {
                 await this.ScenarioStartAsync();
-#line 41
+#line 43
     await testRunner.GivenAsync("uma ordem de serviço com orçamento aprovado e insumos a reservar", ((string)(null)), ((global::Reqnroll.Table)(null)), "Dado ");
 #line hidden
-#line 42
+#line 44
     await testRunner.AndAsync("o Execução confirma a reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 43
+#line 45
     await testRunner.ThenAsync("a Saga está no estado \"ExecucaoLiberada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 44
+#line 46
     await testRunner.WhenAsync("o atendente cancela a ordem de serviço", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
-#line 45
+#line 47
     await testRunner.ThenAsync("a Saga está no estado \"Compensando\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
-#line 46
+#line 48
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden
-#line 47
-    await testRunner.WhenAsync("o Execução confirma o cancelamento da execução", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
-#line hidden
-#line 48
-    await testRunner.ThenAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar.v1, exe" +
-                        "cucao.cancelar-reserva.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
-#line hidden
 #line 49
-    await testRunner.WhenAsync("o Execução confirma o cancelamento da reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+    await testRunner.WhenAsync("o Execução confirma o cancelamento da execução", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
 #line 50
     await testRunner.ThenAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar.v1, exe" +
-                        "cucao.cancelar-reserva.v1, cobranca.cancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+                        "cucao.cancelar-reserva.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
 #line 51
-    await testRunner.WhenAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
+    await testRunner.WhenAsync("o Execução confirma o cancelamento da reserva dos insumos", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
 #line 52
-    await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+    await testRunner.ThenAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar.v1, exe" +
+                        "cucao.cancelar-reserva.v1, cobranca.cancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
 #line hidden
 #line 53
-    await testRunner.AndAsync("a ordem de serviço está com o status \"Cancelada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+    await testRunner.WhenAsync("a Cobrança confirma o cancelamento do orçamento", ((string)(null)), ((global::Reqnroll.Table)(null)), "Quando ");
 #line hidden
 #line 54
+    await testRunner.ThenAsync("a Saga está no estado \"Compensada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Então ");
+#line hidden
+#line 55
+    await testRunner.AndAsync("a ordem de serviço está com o status \"Cancelada\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
+#line hidden
+#line 56
     await testRunner.AndAsync("a Saga enviou, nesta ordem, os comandos de compensação \"execucao.cancelar.v1, exe" +
                         "cucao.cancelar-reserva.v1, cobranca.cancelar-orcamento.v1\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "E ");
 #line hidden

@@ -56,6 +56,10 @@ public sealed class PassosSaga(ContextoSaga saga)
     [Then("nenhum comando de compensação foi enviado")]
     public void EntaoSemCompensacao() => Assert.Empty(saga.Compensacoes);
 
+    [Then("o histórico da Saga registra o pagamento {string}")]
+    public async Task EntaoPagamentoNoHistorico(string status) =>
+        Assert.Single(await saga.RegistrosAsync(TiposMensagem.PagamentoResultado), d => d.Contains($" {status} ", StringComparison.Ordinal));
+
     [Then("a Saga alertou {string}")]
     public void EntaoAlerta(string codigo) => Assert.Contains(codigo, saga.Alertas);
 }

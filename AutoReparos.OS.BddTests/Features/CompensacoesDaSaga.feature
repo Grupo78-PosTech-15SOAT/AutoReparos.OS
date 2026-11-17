@@ -9,7 +9,9 @@ Funcionalidade: Compensações da Saga do OS
     Quando a Cobrança informa o pagamento "Rejeitado"
     Então a Saga está no estado "ExecucaoConcluida"
     E a ordem de serviço está com o status "Concluida"
+    E o histórico da Saga registra o pagamento "Rejeitado"
     E nenhum comando de compensação foi enviado
+    E a Saga enviou, nesta ordem, os comandos "execucao.reservar-insumos.v1, ordem-servico.liberada.v1"
 
   Cenário: Falha na reserva de insumos aguarda saldo e o cancelamento compensa só o orçamento
     Dado uma ordem de serviço com orçamento aprovado e insumos a reservar

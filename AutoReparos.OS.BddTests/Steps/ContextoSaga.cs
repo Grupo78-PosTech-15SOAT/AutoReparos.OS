@@ -50,6 +50,10 @@ public sealed class ContextoSaga(SagaAmbiente ambiente) : SagaTestBase(ambiente)
 
     public Task ReceberOrcamentoCanceladoAsync() => ReceberAsync(TiposMensagem.OrcamentoCancelado, ("orcamentoId", Saga!.OrcamentoId));
 
+    /// <summary>Descrições do histórico da Saga para um tipo de evento, na ordem de registro.</summary>
+    public async Task<IReadOnlyList<string>> RegistrosAsync(string evento) =>
+        (await SagaAsync(OrdemServicoId)).Registros.Where(r => r.Evento == evento).Select(r => r.Descricao).ToList();
+
     public async Task<EstadoSaga> EstadoAsync() => (await SagaAsync(OrdemServicoId)).Estado;
 
     public async Task<string> StatusOSAsync() => (await OSAsync(OrdemServicoId)).Status;
